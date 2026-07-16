@@ -1,0 +1,7 @@
+build/
+dist/
+.DS_Store
+
+# local multi-repo workspace (go.work lives above this repo)
+go.work
+go.work.sum

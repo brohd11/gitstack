@@ -3,7 +3,7 @@ module github.com/brohd11/gitstack
 go 1.26.3
 
 require (
-	github.com/brohd11/bubblestack v0.0.0-00010101000000-000000000000
+	github.com/brohd11/bubblestack v0.1.0
 	github.com/charmbracelet/bubbles v1.0.0
 )
 
@@ -33,7 +33,3 @@ require (
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.3.8 // indirect
 )
-
-// bubblestack is the reusable TUI framework, developed in-tree next to this module.
-// Local replace keeps gitstack building against the working copy until it's published.
-replace github.com/brohd11/bubblestack => ../bubblestack
