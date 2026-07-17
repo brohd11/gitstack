@@ -3,7 +3,7 @@ module github.com/brohd11/gitstack
 go 1.26.3
 
 require (
-	github.com/brohd11/bubblestack v0.1.0
+	github.com/brohd11/bubblestack v0.1.1
 	github.com/charmbracelet/bubbles v1.0.0
 )
 
