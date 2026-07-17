@@ -145,7 +145,9 @@ func commitDesc(dir string) string {
 // silently miss the commit. Rather than pick a surprise for the user, the form makes the
 // choice explicit and the confirm screen shows its consequences.
 func newCommitForm(r repo.Repo) *components.FormScreen {
-	msgF := components.NewTextField("message", "Message: ", "what changed?")
+	// A commit message is the one field long enough to need it: NewTextAreaField wraps and
+	// grows downward where NewTextField would scroll the start of the line out of view.
+	msgF := components.NewTextAreaField("message", "Message: ", "what changed?")
 	stageF := components.NewToggleField("stage", "Stage:   ", stageOptions, "|")
 
 	return components.NewForm(components.FormOpts{

@@ -5,7 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func rp(name, branch string) repo.Repo {
@@ -78,6 +81,23 @@ func TestCommitBodyCleanNoBranch(t *testing.T) {
 	}
 	if !strings.Contains(body, "Commit 1 file(s) in addon:") {
 		t.Errorf("unexpected header:\n%s", body)
+	}
+}
+
+// TestCommitFormMessageRoundTrips drives the real form at the real call site. The message
+// is the workspace's only TextAreaField, and FormScreen.Value used to assert on *TextField
+// concretely — so without the widened lookup a typed message would read back as "" here
+// and OnSubmit would reject every commit as missing a message.
+func TestCommitFormMessageRoundTrips(t *testing.T) {
+	f := newCommitForm(rp("dialogic", "main"))
+	sh := core.NewShared(nil)
+	f.Init(sh) // the form opens focused on the message field
+
+	for _, r := range "fix timeline crash" {
+		f.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if got := f.Value("message"); got != "fix timeline crash" {
+		t.Errorf("a typed commit message should reach OnSubmit, Value = %q", got)
 	}
 }
 
