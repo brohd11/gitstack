@@ -73,6 +73,13 @@ func repoItems(r repo.Repo) []list.Item {
 			Pick: task("reading status…", "", repo.GitStatus),
 		},
 		components.Item{
+			// Sits under Status because it answers the next question: Status names the
+			// files that changed, Diff shows what changed in them.
+			Name: "◧ Diff",
+			Desc: diffDesc(dir),
+			Pick: func(sh *core.Shared) core.Action { return core.Push(DiffMenu(sh, r)) },
+		},
+		components.Item{
 			Name: "⇩ Pull",
 			Desc: pullDesc(sync),
 			Pick: task("pulling "+name+"…", "pulled", repo.GitPull),
@@ -113,6 +120,14 @@ func pushDesc(sync repo.GitSync) string {
 		return fmt.Sprintf("push %d local commit(s) to origin", sync.Ahead)
 	}
 	return "nothing to push"
+}
+
+func diffDesc(dir string) string {
+	changes, err := repo.GitChanges(dir)
+	if err != nil || len(changes) == 0 {
+		return "nothing has changed since the last commit"
+	}
+	return fmt.Sprintf("see what changed in %d file(s)", len(changes))
 }
 
 func commitDesc(dir string) string {
