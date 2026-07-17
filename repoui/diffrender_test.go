@@ -236,23 +236,62 @@ func TestExpandTabs(t *testing.T) {
 	}
 }
 
-// TestParseDiffBinary: git reports a binary file with a one-line note and no hunks. It
-// should survive as a readable note rather than vanish or be read as content.
+// TestParseDiffBinary: git reports a binary file with a one-line note and no hunks. The
+// note has to survive — a header with nothing under it needs a reason — but not as git
+// writes it, which restates the path the header already shows and, for the --no-index
+// capture an untracked file takes, names /dev/null as well.
 func TestParseDiffBinary(t *testing.T) {
-	raw := "diff --git a/bin.dat b/bin.dat\nnew file mode 100644\nindex 0000000..c94be36\nBinary files /dev/null and b/bin.dat differ\n"
-	lines := parseDiff(raw)
+	// An untracked binary, captured via `diff --no-index -- /dev/null bin.dat`.
+	t.Run("untracked", func(t *testing.T) {
+		raw := "diff --git a/bin.dat b/bin.dat\nnew file mode 100644\nindex 0000000..c94be36\nBinary files /dev/null and b/bin.dat differ\n"
+		lines := parseDiff(raw)
 
-	var kinds []string
+		if len(lines) != 3 ||
+			lines[0].kind != kindFile ||
+			lines[1].kind != kindMeta ||
+			lines[2].kind != kindMeta {
+			t.Fatalf("want a file header + two notes, got %q", kindStrings(lines))
+		}
+		if lines[0].text != "bin.dat" {
+			t.Errorf("the header should name the file once, cleanly: %q", lines[0].text)
+		}
+		if lines[2].text != binaryNote {
+			t.Errorf("lines[2] = %q, want the normalized note %q", lines[2].text, binaryNote)
+		}
+		// The regression: /dev/null is how the diff was taken, not part of it.
+		if strings.Contains(lines[2].text, "/dev/null") {
+			t.Errorf("the --no-index null device leaked into the page: %q", lines[2].text)
+		}
+		if strings.Contains(lines[2].text, "b/") {
+			t.Errorf("git's b/ prefix leaked into the page: %q", lines[2].text)
+		}
+	})
+
+	// A modified tracked binary: no "new file mode" line and no hunks, so the note is the
+	// only thing under the header — which is what it has to carry on its own.
+	t.Run("modified tracked", func(t *testing.T) {
+		raw := "diff --git a/icon.png b/icon.png\nindex 8352675..877588e 100644\nBinary files a/icon.png and b/icon.png differ\n"
+		lines := parseDiff(raw)
+
+		if len(lines) != 2 || lines[0].kind != kindFile || lines[1].kind != kindMeta {
+			t.Fatalf("want a file header + one note, got %q", kindStrings(lines))
+		}
+		if lines[1].text != binaryNote {
+			t.Errorf("lines[1] = %q, want the normalized note %q", lines[1].text, binaryNote)
+		}
+		if strings.Contains(lines[1].text, "icon.png") {
+			t.Errorf("the note should not restate the path the header names: %q", lines[1].text)
+		}
+	})
+}
+
+// kindStrings renders parsed lines as "kind:text" for a failure message.
+func kindStrings(lines []diffLine) []string {
+	out := make([]string, 0, len(lines))
 	for _, l := range lines {
-		kinds = append(kinds, string(l.kind)+":"+l.text)
+		out = append(out, string(l.kind)+":"+l.text)
 	}
-	if len(lines) != 3 ||
-		lines[0].kind != kindFile ||
-		lines[1].kind != kindMeta ||
-		lines[2].kind != kindMeta ||
-		!strings.Contains(lines[2].text, "Binary files") {
-		t.Errorf("binary file should parse to a file header + two notes, got %q", kinds)
-	}
+	return out
 }
 
 // TestNoNewlineDoesNotBreakPairing is a regression test for the bug that side-by-side

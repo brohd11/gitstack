@@ -244,6 +244,12 @@ func (c GitChange) Untracked() bool { return c.Code == "??" }
 // folder that isn't a checkout — the same tolerant reading as HasUncommittedChanges, which
 // is just the "is this list empty" question. core.quotepath=false keeps non-ASCII paths
 // readable rather than \NNN-escaped.
+//
+// -uall names every untracked file; status's default (-unormal) would collapse a new
+// directory into one "?? dir/" entry, and a directory is not something a caller can act on
+// one file at a time: the diff view has nothing to render for it (`diff --no-index` against
+// a directory fails), and the commit confirm would list "dir/" for a commit that stages its
+// files individually. The entry has to name a file for either to mean anything.
 func GitChanges(dir string) ([]GitChange, error) {
 	if dir == "" {
 		return nil, nil
@@ -251,7 +257,7 @@ func GitChanges(dir string) ([]GitChange, error) {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return nil, nil
 	}
-	out, err := exec.Command("git", "-C", dir, "-c", "core.quotepath=false", "status", "--porcelain").Output()
+	out, err := exec.Command("git", "-C", dir, "-c", "core.quotepath=false", "status", "--porcelain", "-uall").Output()
 	if err != nil {
 		return nil, fmt.Errorf("could not read git status in %s: %w", dir, err)
 	}

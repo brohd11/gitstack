@@ -282,8 +282,10 @@ func diffItems(r repo.Repo) []list.Item {
 		items = append(items, components.Item{
 			Name: "◫ " + r.Name,
 			Desc: allFilesDesc(changes, stats),
+			// untracked=true: this row counts the untracked files in its description and
+			// says "every change", so it has to ask for the diff that includes them.
 			Pick: func(*core.Shared) core.Action {
-				return core.Push(NewDiffScreen(r.Name, r.Dir, "", false))
+				return core.Push(NewDiffScreen(r.Name, r.Dir, "", true))
 			},
 		})
 	}

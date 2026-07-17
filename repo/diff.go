@@ -31,9 +31,13 @@ import (
 const diffAgainst = "HEAD"
 
 // Diff returns the unified diff of dir's working tree for one path, or for every changed
-// file when path is "". Untracked files are not in HEAD, so git has nothing to diff them
-// against and reports nothing at all; untracked=true switches to --no-index against
-// /dev/null, which renders the new file as one all-additions hunk.
+// file when path is "".
+//
+// untracked says whether untracked content is in scope, and it has to be asked either way
+// because `diff HEAD` cannot answer for it: a file that is in neither HEAD nor the index is
+// not something git has anything to compare, so it reports nothing at all rather than
+// reporting a new file. With untracked=true a path diffs via --no-index against /dev/null —
+// one all-additions hunk — and an empty path diffs the whole tree that way (see diffAll).
 //
 // The returned string is git's raw output, uninterpreted.
 func Diff(dir, path string, untracked bool) (string, error) {
@@ -42,7 +46,7 @@ func Diff(dir, path string, untracked bool) (string, error) {
 	}
 	if untracked {
 		if path == "" {
-			return "", errors.New("an untracked diff needs a file path")
+			return diffAll(dir)
 		}
 		return diffNoIndex(dir, path)
 	}
@@ -62,6 +66,53 @@ func Diff(dir, path string, untracked bool) (string, error) {
 		return "", err
 	}
 	return out, nil
+}
+
+// diffAll is the whole working tree with nothing left out: `diff HEAD` for the files git
+// tracks, then one --no-index diff appended per untracked file. Two git invocations cannot
+// be avoided here — no single command reports both, and the alternative (`add -N` to
+// intend-to-add the new files first) writes to the index, which a view that only reads must
+// not do.
+//
+// Without the second half this is the aggregate view's old behavior, and it was a lie: the
+// picker row counts untracked files in its "N files" and promised "every change in one
+// page", while `diff HEAD` silently dropped every one of them.
+func diffAll(dir string) (string, error) {
+	var parts []string
+
+	// A repo with no commits has no HEAD to diff against — but every file in it is
+	// untracked, so the loop below can still render the whole tree. Only the tracked half
+	// is missing, and it is missing because there is none.
+	if hasHEAD(dir) {
+		out, err := gitCapture(dir, "-c", "core.quotepath=false", "diff", diffAgainst)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(out) != "" {
+			parts = append(parts, out)
+		}
+	}
+
+	changes, err := GitChanges(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, c := range changes {
+		if !c.Untracked() {
+			continue
+		}
+		out, err := diffNoIndex(dir, c.Path)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(out) != "" {
+			parts = append(parts, out)
+		}
+	}
+
+	// Each diff ends in its own newline, so the parts abut cleanly: every one begins at a
+	// "diff --git" header, which is where the parser starts a new file either way.
+	return strings.Join(parts, ""), nil
 }
 
 // diffNoIndex renders an untracked file as a diff against the null device (os.DevNull, so

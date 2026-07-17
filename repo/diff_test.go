@@ -89,11 +89,74 @@ func TestDiffUntracked(t *testing.T) {
 	}
 }
 
-// TestDiffUntrackedNeedsPath: "every untracked file" isn't a thing --no-index can express,
-// so asking for it is a caller bug and should say so rather than shell out to nonsense.
-func TestDiffUntrackedNeedsPath(t *testing.T) {
-	if _, err := Diff(diffRepo(t), "", true); err == nil {
-		t.Error("an untracked diff with no path should be an error")
+// TestDiffAllIncludesUntracked is the regression this file previously missed entirely: the
+// picker's aggregate row counts untracked files in its "N files" and calls itself "every
+// change in one page", but asked for `diff HEAD` — which cannot report a file that is in
+// neither HEAD nor the index, and so dropped every one of them without a word.
+func TestDiffAllIncludesUntracked(t *testing.T) {
+	dir := diffRepo(t)
+
+	out, err := Diff(dir, "", true)
+	if err != nil {
+		t.Fatalf("Diff(all, untracked): %v", err)
+	}
+	for _, want := range []string{"+three", "+staged", "+brand new"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the aggregate diff is missing %q — it must hold every change:\n%s", want, out)
+		}
+	}
+
+	// The tracked-only reading stays available and stays tracked-only; the two answers are
+	// different questions, and untracked=false is still the one `commit -a` would ask.
+	tracked, err := Diff(dir, "", false)
+	if err != nil {
+		t.Fatalf("Diff(all, tracked): %v", err)
+	}
+	if strings.Contains(tracked, "brand new") {
+		t.Errorf("untracked=false must not reach untracked files:\n%s", tracked)
+	}
+}
+
+// TestDiffAllUntrackedDirectory: status -uall names the files inside a new directory, which
+// is what makes them diffable — an entry of "newdir/" would not be. `diff --no-index`
+// against a directory fails with exit 1, the same status the untracked path treats as
+// success, so the collapsed form failed silently and rendered as an empty diff.
+func TestDiffAllUntrackedDirectory(t *testing.T) {
+	dir := diffRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, "newdir", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "newdir", "sub", "nested.txt"), []byte("nested\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Diff(dir, "", true)
+	if err != nil {
+		t.Fatalf("Diff(all, untracked): %v", err)
+	}
+	if !strings.Contains(out, "+nested") {
+		t.Errorf("a file inside a new directory belongs in the aggregate diff:\n%s", out)
+	}
+	if !strings.Contains(out, filepath.Join("newdir", "sub", "nested.txt")) {
+		t.Errorf("the nested file should be named by its own path:\n%s", out)
+	}
+}
+
+// TestDiffAllNoCommits: a fresh repo has no HEAD to diff against, but every file in it is
+// untracked — so the aggregate has everything to show and nothing to fail on.
+func TestDiffAllNoCommits(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("first\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := Diff(dir, "", true)
+	if err != nil {
+		t.Fatalf("the aggregate diff of a repo with no commits should render its new files, got: %v", err)
+	}
+	if !strings.Contains(out, "+first") {
+		t.Errorf("want the new file's contents as additions:\n%s", out)
 	}
 }
 

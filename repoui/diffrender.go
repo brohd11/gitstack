@@ -49,6 +49,17 @@ type diffLine struct {
 // rendering, which is what this repo's own diffs are made of.
 const tabStop = 4
 
+// binaryNote replaces git's own binary line, which says nothing the page doesn't already
+// show: "Binary files a/x and b/x differ" restates — twice — the path the file header
+// spells out one line up, and the --no-index capture that renders an untracked file makes
+// it worse ("Binary files /dev/null and b/x differ"), leaking the null device the diff was
+// taken against. That's a detail of how the answer was obtained, not part of the answer.
+//
+// What the note is actually for is the absence beneath it: a file header with no hunks
+// under it needs a reason, and "it's binary" is the whole reason. "binary file" is the
+// wording fileDesc already uses for this condition on the picker row.
+const binaryNote = "binary file — contents not shown"
+
 // parseDiff turns git's raw unified output into lines the renderers can lay out.
 //
 // The subtlety is that "---" and "+++" (the file's from/to header) begin with the same
@@ -83,9 +94,12 @@ func parseDiff(raw string) []diffLine {
 			strings.HasPrefix(line, "old mode") ||
 			strings.HasPrefix(line, "new mode") ||
 			strings.HasPrefix(line, "rename ") ||
-			strings.HasPrefix(line, "copy ") ||
-			strings.HasPrefix(line, "Binary files ")):
+			strings.HasPrefix(line, "copy ")):
 			lines = append(lines, diffLine{kind: kindMeta, text: line})
+
+		// The one note git writes that the page can't use as written — see binaryNote.
+		case !inHunk && strings.HasPrefix(line, "Binary files "):
+			lines = append(lines, diffLine{kind: kindMeta, text: binaryNote})
 
 		case strings.HasPrefix(line, "@@"):
 			inHunk = true
