@@ -22,22 +22,46 @@ type Scope struct {
 	Repos func(*core.Shared) []repo.Repo
 }
 
+// RootOption optionally augments the batch menu with an "include root" toggle row. When Repo
+// returns ok, while the toggle is on that repo is appended to the targets of every operation.
+// Zero value (nil Repo) ⇒ no row, no target — the menu is scopes-only, exactly as before.
+type RootOption struct {
+	Repo func(*core.Shared) (repo.Repo, bool)
+}
+
+// RootOptionFor builds a RootOption from a pointer accessor: it yields the pointed-to repo
+// when non-nil, nothing otherwise (no toggle row). Consumers that keep a *repo.Repo on their
+// context — the scanned base / project root when it's a checkout — pass a one-line getter
+// rather than re-spelling the nil-check-and-deref closure.
+func RootOptionFor(get func(*core.Shared) *repo.Repo) RootOption {
+	return RootOption{Repo: func(sh *core.Shared) (repo.Repo, bool) {
+		if r := get(sh); r != nil {
+			return *r, true
+		}
+		return repo.Repo{}, false
+	}}
+}
+
 // AllReposMenu is the batch git menu: fetch, pull, or push every repo in the active scope,
 // cycling through scopes when more than one is given. PopStop makes it the hub the
 // confirm/task sub-flows return to.
-func AllReposMenu(sh *core.Shared, scopes []Scope) *components.PickerScreen {
-	return scopeScreen(sh, scopes, 0)
+func AllReposMenu(sh *core.Shared, scopes []Scope, root RootOption) *components.PickerScreen {
+	return scopeScreen(sh, scopes, 0, root, false)
 }
 
 // scopeScreen builds the menu at a given scope index. Cycling replaces the screen with a
 // fresh one at the next index, so the rows (and their live counts) rebuild from the new
 // filter.
-func scopeScreen(sh *core.Shared, scopes []Scope, i int) *components.PickerScreen {
+func scopeScreen(sh *core.Shared, scopes []Scope, i int, root RootOption, includeRoot bool) *components.PickerScreen {
 	if len(scopes) == 0 {
 		scopes = []Scope{{Label: "repos", Repos: func(*core.Shared) []repo.Repo { return nil }}}
 		i = 0
 	}
-	return components.NewPicker(menuItems(scopes, i, scopes[i].Repos(sh)), components.PickerOpts{
+	rootOK := false
+	if root.Repo != nil {
+		_, rootOK = root.Repo(sh)
+	}
+	return components.NewPicker(menuItems(scopes, i, scopeTargets(scopes[i], root, includeRoot, sh), root, includeRoot, rootOK), components.PickerOpts{
 		Title:   "Git — all repos (" + scopes[i].Label + ")",
 		Crumb:   "Git all",
 		PopStop: true,
@@ -47,12 +71,28 @@ func scopeScreen(sh *core.Shared, scopes []Scope, i int) *components.PickerScree
 			if _, ok := payload.(RefreshMsg); !ok {
 				return nil, false
 			}
-			return menuItems(scopes, i, scopes[i].Repos(sh)), true
+			rootOK := false
+			if root.Repo != nil {
+				_, rootOK = root.Repo(sh)
+			}
+			return menuItems(scopes, i, scopeTargets(scopes[i], root, includeRoot, sh), root, includeRoot, rootOK), true
 		},
 	})
 }
 
-func menuItems(scopes []Scope, i int, targets []repo.Repo) []list.Item {
+// scopeTargets is the one place the batch's target set is decided: the active scope's repos,
+// plus the optional root when the include-root toggle is on and the root provider yields one.
+func scopeTargets(scope Scope, root RootOption, includeRoot bool, sh *core.Shared) []repo.Repo {
+	targets := scope.Repos(sh)
+	if includeRoot && root.Repo != nil {
+		if r, ok := root.Repo(sh); ok {
+			targets = append(targets, r)
+		}
+	}
+	return targets
+}
+
+func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, includeRoot, rootOK bool) []list.Item {
 	behind, ahead := 0, 0
 	for _, t := range targets {
 		if t.Sync.Behind > 0 {
@@ -70,10 +110,10 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo) []list.Item {
 			Name: label,
 			Desc: desc,
 			Pick: func(sh *core.Shared) core.Action {
-				if len(scopes[i].Repos(sh)) == 0 {
+				if len(scopeTargets(scopes[i], root, includeRoot, sh)) == 0 {
 					return core.SetStatusAndLog("no " + noun + " to " + verb)
 				}
-				return core.Push(newBatchConfirm(scopes, i, verb, label, run))
+				return core.Push(newBatchConfirm(scopes, i, root, includeRoot, verb, label, run))
 			},
 		}
 	}
@@ -88,13 +128,29 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo) []list.Item {
 			fmt.Sprintf("push local commits — %d of %d %s ahead", ahead, n, noun)),
 	}
 
+	// The include-root row only earns a place when the provider can yield a root (a base that
+	// isn't a checkout adds nothing).
+	if rootOK {
+		state := "off"
+		if includeRoot {
+			state = "on"
+		}
+		items = append(items, components.Item{
+			Name: "⌂ Include root: " + state,
+			Desc: "add the base repo itself to every batch op",
+			Pick: func(sh *core.Shared) core.Action {
+				return core.Replace(scopeScreen(sh, scopes, i, root, !includeRoot))
+			},
+		})
+	}
+
 	// The scope switch only earns a row when there's more than one to cycle between.
 	if len(scopes) > 1 {
 		next := (i + 1) % len(scopes)
 		items = append(items, components.Item{
 			Name: "⚙ Scope: " + scopes[i].Label,
 			Desc: "enter to cycle → " + scopes[next].Label,
-			Pick: func(sh *core.Shared) core.Action { return core.Replace(scopeScreen(sh, scopes, next)) },
+			Pick: func(sh *core.Shared) core.Action { return core.Replace(scopeScreen(sh, scopes, next, root, includeRoot)) },
 		})
 	}
 	return items
@@ -103,12 +159,12 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo) []list.Item {
 // ---------- confirm + batch ----------
 
 // newBatchConfirm lists every repo the operation will touch, then runs the batch on confirm.
-func newBatchConfirm(scopes []Scope, i int, verb, label string, run func(context.Context, string, repo.Reporter) error) *components.DialogScreen {
+func newBatchConfirm(scopes []Scope, i int, root RootOption, includeRoot bool, verb, label string, run func(context.Context, string, repo.Reporter) error) *components.DialogScreen {
 	return components.CreateConfirmScreen(components.ConfirmSimple{
 		Crumb:  "Confirm",
-		Render: func(sh *core.Shared) string { return sh.Box(confirmBody(verb, scopes[i].Repos(sh))) },
+		Render: func(sh *core.Shared) string { return sh.Box(confirmBody(verb, scopeTargets(scopes[i], root, includeRoot, sh))) },
 		OnYesLamda: func(sh *core.Shared) core.Action {
-			return core.Replace(newBatchTask(scopes, i, verb, label, run))
+			return core.Replace(newBatchTask(scopes, i, root, includeRoot, verb, label, run))
 		},
 	})
 }
@@ -173,10 +229,10 @@ func syncNote(verb string, s repo.GitSync) string {
 // unreadable, and reading what git said is the whole point of this screen (the concurrent,
 // no-confirm path is a caller's fetch key). ctx is checked between repos so esc abandons the
 // rest.
-func newBatchTask(scopes []Scope, i int, verb, label string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
+func newBatchTask(scopes []Scope, i int, root RootOption, includeRoot bool, verb, label string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
 	var done, failed int
 	run := func(ctx context.Context, sh *core.Shared, report func(string, ...any), doneCh chan<- core.TaskEvent) {
-		targets := scopes[i].Repos(sh)
+		targets := scopeTargets(scopes[i], root, includeRoot, sh)
 		for j, t := range targets {
 			if ctx.Err() != nil {
 				report("aborted — %d repo(s) not reached", len(targets)-j)

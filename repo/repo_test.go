@@ -253,6 +253,55 @@ func TestScan(t *testing.T) {
 	}
 }
 
+func TestDescribeRoot(t *testing.T) {
+	// A non-checkout base: ok is false, no root to describe.
+	empty := t.TempDir()
+	if _, ok := DescribeRoot(empty); ok {
+		t.Errorf("DescribeRoot on a non-checkout should report ok=false")
+	}
+
+	// A checkout base: described as itself, marked Root, named for its final path element.
+	base := t.TempDir()
+	initRepo(t, base, "https://github.com/owner/root.git", "main")
+	os.WriteFile(filepath.Join(base, "wip.txt"), []byte("x"), 0o644) // dirty
+
+	r, ok := DescribeRoot(base)
+	if !ok {
+		t.Fatal("DescribeRoot on a checkout should report ok=true")
+	}
+	if !r.Root {
+		t.Errorf("DescribeRoot result should have Root=true: %+v", r)
+	}
+	if r.Name != filepath.Base(base) || r.Dir != base {
+		t.Errorf("DescribeRoot = %+v, want Name=%q Dir=%q", r, filepath.Base(base), base)
+	}
+	if r.Branch != "main" || !r.Dirty {
+		t.Errorf("DescribeRoot = %+v, want branch main, dirty", r)
+	}
+}
+
+func TestStatusMarker(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		r    Repo
+		want string
+	}{
+		{"clean in-sync", Repo{}, ""},
+		{"behind", Repo{Sync: GitSync{Behind: 2, Tracking: true}}, "  ⚠ [behind origin 2]"},
+		{"ahead", Repo{Sync: GitSync{Ahead: 1, Tracking: true}}, "  ⚠ [ahead 1]"},
+		{"dirty", Repo{Dirty: true}, "  ⚠ [uncommitted changes]"},
+		{
+			"behind+ahead+dirty",
+			Repo{Sync: GitSync{Behind: 2, Ahead: 1, Tracking: true}, Dirty: true},
+			"  ⚠ [behind origin 2 / ahead 1 / uncommitted changes]",
+		},
+	} {
+		if got := StatusMarker(tc.r); got != tc.want {
+			t.Errorf("StatusMarker(%s) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestGitChangesAndCommit(t *testing.T) {
 	_, work := upstreamClone(t)
 

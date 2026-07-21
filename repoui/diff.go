@@ -252,6 +252,19 @@ func (s *DiffScreen) HelpView(sh *core.Shared) string {
 
 // ---------- the file picker ----------
 
+// DiffAction is what a row's "d" does: push the per-repo Git menu, then the diff picker on
+// top of it. The Git menu underneath is the hub with Commit, so esc from a diff lands on the
+// action the diff was read to inform — reading a diff is the step before committing. The
+// trail reads "… › Git › Diff", and since esc is a one-level pop, the alternative (pushing
+// the picker alone) would make you esc to the list and re-enter via the Git key to reach the
+// action the diff just argued for.
+func DiffAction(sh *core.Shared, r repo.Repo) core.Action {
+	return core.Seq(
+		core.Push(RepoMenu(sh, r)),
+		core.Push(DiffMenu(sh, r)),
+	)
+}
+
 // DiffMenu lists what changed, so a diff can be read one file at a time instead of as one
 // long scroll. The first row is the whole repo's diff — the common case when the change is
 // small, and the one that shows how the files relate.

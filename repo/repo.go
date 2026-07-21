@@ -37,6 +37,7 @@ type Repo struct {
 	Branch string  // checked-out branch, for display ("" when unknown/detached)
 	Sync   GitSync // cached divergence from upstream, as of the caller's last read
 	Dirty  bool    // cached: working tree has uncommitted changes
+	Root   bool    // true when this is the scanned base directory itself, not a nested checkout
 }
 
 // maxConcurrentFetch caps how many fetches FetchAll runs at once, so a large tree can't
@@ -83,6 +84,40 @@ func Scan(base string, maxDepth int) ([]Repo, error) {
 		out = append(out, Describe(rel, filepath.Join(base, rel)))
 	}
 	return out, nil
+}
+
+// DescribeRoot reads base's own git state as a Repo marked Root, for a viewer that wants to
+// surface the scanned directory itself (which Scan/FindGitRepos deliberately omit). ok is false
+// when base is not a git checkout. Name is base's final path element.
+func DescribeRoot(base string) (Repo, bool) {
+	if _, err := os.Stat(filepath.Join(base, ".git")); err != nil {
+		return Repo{}, false
+	}
+	r := Describe(filepath.Base(base), base)
+	r.Root = true
+	return r, true
+}
+
+// StatusMarker renders the warning suffix from a Repo's cached git state — behind / ahead /
+// dirty — as a bracketed suffix a caller can append to the repo's name or to a header line
+// (e.g. "  ⚠ [behind origin 2 / ahead 1 / uncommitted changes]"). Empty when the repo is in
+// sync with its upstream and clean. The counts are as fresh as the caller's last read —
+// Describe/Scan fill them, and a fetch followed by a re-describe is how they settle.
+func StatusMarker(r Repo) string {
+	var parts []string
+	if r.Sync.Behind > 0 {
+		parts = append(parts, fmt.Sprintf("behind origin %d", r.Sync.Behind))
+	}
+	if r.Sync.Ahead > 0 {
+		parts = append(parts, fmt.Sprintf("ahead %d", r.Sync.Ahead))
+	}
+	if r.Dirty {
+		parts = append(parts, "uncommitted changes")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "  ⚠ [" + strings.Join(parts, " / ") + "]"
 }
 
 // HasUncommittedChanges reports whether dir is a git checkout (a standalone clone or

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
 )
 
@@ -72,6 +73,35 @@ func TestConfirmBodyCaps(t *testing.T) {
 	}
 	if !strings.Contains(body, "Pull 20 repo(s)") {
 		t.Errorf("the count must be the true total, not the shown subset:\n%s", body)
+	}
+}
+
+func TestScopeTargetsIncludeRoot(t *testing.T) {
+	scope := Scope{Label: "all", Repos: func(*core.Shared) []repo.Repo {
+		return []repo.Repo{tgt("nested", 0, 0)}
+	}}
+	root := RootOption{Repo: func(*core.Shared) (repo.Repo, bool) {
+		return repo.Repo{Name: "base", Root: true}, true
+	}}
+	noRoot := RootOption{}
+
+	// Toggle off: scopes-only, even with a provider.
+	if got := scopeTargets(scope, root, false, nil); len(got) != 1 || got[0].Name != "nested" {
+		t.Errorf("scopeTargets(includeRoot=false) = %+v, want just [nested]", got)
+	}
+	// Toggle on with a yielding provider: the root rides along, appended after the scope repos.
+	got := scopeTargets(scope, root, true, nil)
+	if len(got) != 2 || got[1].Name != "base" {
+		t.Errorf("scopeTargets(includeRoot=true) = %+v, want [nested base]", got)
+	}
+	// Toggle on but no provider: scopes-only.
+	if got := scopeTargets(scope, noRoot, true, nil); len(got) != 1 {
+		t.Errorf("scopeTargets(nil provider, includeRoot=true) = %+v, want just [nested]", got)
+	}
+	// Toggle on but the provider yields nothing (base not a checkout): scopes-only.
+	dryRoot := RootOption{Repo: func(*core.Shared) (repo.Repo, bool) { return repo.Repo{}, false }}
+	if got := scopeTargets(scope, dryRoot, true, nil); len(got) != 1 {
+		t.Errorf("scopeTargets(ok=false, includeRoot=true) = %+v, want just [nested]", got)
 	}
 }
 
