@@ -335,3 +335,37 @@ func TestNoNewlineDoesNotBreakPairing(t *testing.T) {
 		t.Errorf("the no-newline note should still be shown:\n%s", out)
 	}
 }
+
+// TestRenderSeparatesFiles: a whole-repo diff puts one file's header directly after the
+// previous file's last line unless the renderers add a break — which is what makes a
+// multi-file page read as one wall of text. The assertion looks at the two rows above
+// the header, so it holds whether fileSepRule draws a rule (blank, rule, header) or not
+// (blank, header).
+func TestRenderSeparatesFiles(t *testing.T) {
+	twoFiles := sampleDiff + `diff --git a/b.txt b/b.txt
+index 1111111..2222222 100644
+--- a/b.txt
++++ b/b.txt
+@@ -1 +1 @@
+-old
++new
+`
+	lines := parseDiff(twoFiles)
+
+	for name, out := range map[string]string{
+		"unified": renderUnified(lines, 80, false),
+		"split":   renderSplit(lines, 120, false),
+	} {
+		rows := strings.Split(ansi.Strip(out), "\n")
+		for i, r := range rows {
+			if strings.TrimSpace(r) != "b.txt" {
+				continue
+			}
+			blank := i > 0 && strings.TrimSpace(rows[i-1]) == ""
+			blank = blank || i > 1 && strings.TrimSpace(rows[i-2]) == ""
+			if !blank {
+				t.Errorf("%s: the second file's header has no blank line before it:\n%s", name, out)
+			}
+		}
+	}
+}

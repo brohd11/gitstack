@@ -248,6 +248,20 @@ func lineStyle(kind byte) lipgloss.Style {
 // wobble narrower than a reader expects.
 const minGutter = 3
 
+// fileSepRule chooses what divides one file's diff from the next in a multi-file view:
+// a muted rule across the width, or a plain blank line. Compile-time because this is a
+// taste check, not a setting — flip it and rebuild to compare.
+const fileSepRule = true
+
+// fileRule is the rule drawn between files when fileSepRule is on. Muted, like the hunk
+// headers and the gutter's │ — it's chrome, not content.
+func fileRule(width int) string {
+	if width < 1 {
+		width = 1
+	}
+	return metaStyle().Render(strings.Repeat("─", width))
+}
+
 // renderUnified lays the diff out in git's own form: one column, each content line kept
 // under its marker, with the old and new line numbers in a gutter. The marker stays here
 // (unlike the split layout) because with one column there's no left/right to tell an
@@ -260,12 +274,22 @@ func renderUnified(lines []diffLine, width int, wrap bool) string {
 	}
 
 	var b strings.Builder
+	seenFile := false
 	for i, l := range lines {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
 		switch l.kind {
 		case kindFile:
+			// A file after the first gets air before its header — otherwise a whole-repo
+			// diff reads as one unbroken wall.
+			if seenFile {
+				b.WriteByte('\n')
+				if fileSepRule {
+					b.WriteString(fileRule(width) + "\n")
+				}
+			}
+			seenFile = true
 			b.WriteString(fileStyle().Render(fit(l.text, width, wrap)))
 		case kindMeta, kindHunk:
 			b.WriteString(metaStyle().Render(fit(l.text, width, wrap)))
@@ -339,10 +363,20 @@ func renderSplit(lines []diffLine, width int, wrap bool) string {
 		b.WriteString(s)
 	}
 
+	seenFile := false
 	for i := 0; i < len(lines); i++ {
 		l := lines[i]
 		switch l.kind {
 		case kindFile:
+			// Same break as the unified layout: a file after the first gets air before
+			// its header.
+			if seenFile {
+				write("")
+				if fileSepRule {
+					write(fileRule(width))
+				}
+			}
+			seenFile = true
 			write(fileStyle().Render(fit(l.text, width, wrap)))
 		case kindMeta, kindHunk:
 			write(metaStyle().Render(fit(l.text, width, wrap)))
