@@ -70,6 +70,7 @@ const layoutCount = 3
 // component to save one viewport field here.
 type DiffScreen struct {
 	title string
+	dir   string // the repo the diff is from; enables the global Terminal key (DirLocator)
 	lines []diffLine
 	empty string // set when there is nothing to show; rendered in place of the diff
 
@@ -81,9 +82,14 @@ type DiffScreen struct {
 }
 
 var (
-	_ core.Crumber = (*DiffScreen)(nil)
-	_ core.Wrapper = (*DiffScreen)(nil)
+	_ core.Crumber    = (*DiffScreen)(nil)
+	_ core.Wrapper    = (*DiffScreen)(nil)
+	_ core.DirLocator = (*DiffScreen)(nil)
 )
+
+// LocateDir reports the repo the diff is from, so the global Terminal key opens a terminal
+// there while viewing the diff. Empty dir ⇒ no locator (the key falls through).
+func (s *DiffScreen) LocateDir() (string, bool) { return s.dir, s.dir != "" }
 
 // NewDiffScreen captures the diff and builds the screen. A capture failure isn't fatal —
 // the screen opens and says what went wrong, which is more use than a status line flashing
@@ -91,6 +97,7 @@ var (
 func NewDiffScreen(title, dir, path string, untracked bool) *DiffScreen {
 	s := &DiffScreen{
 		title: title,
+		dir:   dir,
 		vp:    viewport.New(0, 0),
 		width: -1,
 	}
@@ -272,6 +279,7 @@ func DiffMenu(sh *core.Shared, r repo.Repo) *components.PickerScreen {
 	return components.NewPicker(diffItems(r), components.PickerOpts{
 		Title: r.Name,
 		Crumb: "Diff",
+		Dir:   r.Dir, // "t" opens a terminal at this repo from the Diff list (DirLocator)
 		Refresh: func(sh *core.Shared, payload any) ([]list.Item, bool) {
 			if _, ok := payload.(RefreshMsg); !ok {
 				return nil, false

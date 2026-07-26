@@ -34,6 +34,7 @@ func RepoMenu(sh *core.Shared, r repo.Repo) *components.PickerScreen {
 	return components.NewPicker(repoItems(r), components.PickerOpts{
 		Title:   r.Name,
 		Crumb:   "Git",
+		Dir:     r.Dir, // "t" opens a terminal at this repo from the Git menu (DirLocator)
 		PopStop: true,
 		Refresh: func(sh *core.Shared, payload any) ([]list.Item, bool) {
 			if _, ok := payload.(RefreshMsg); !ok {

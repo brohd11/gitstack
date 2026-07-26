@@ -52,7 +52,9 @@ func Task(label, verb, dir string, op func(context.Context, string, repo.Reporte
 		)
 	}
 	onDismiss := func(*core.Shared) core.Action { return core.PopTo() } // back to the hub
-	return components.NewStayTask(label, "done — esc to go back", run, onDone, onDismiss)
+	ts := components.NewStayTask(label, "done — esc to go back", run, onDone, onDismiss)
+	ts.Dir = dir // "t" opens a terminal at this repo — where a failed op says to resolve it (DirLocator)
+	return ts
 }
 
 // failureLabel names the failed operation from its success verb ("pulled" → "pull failed").
