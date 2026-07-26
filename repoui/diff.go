@@ -249,12 +249,18 @@ func (s *DiffScreen) View(*core.Shared) string {
 }
 
 func (s *DiffScreen) HelpView(sh *core.Shared) string {
-	return sh.BindingHelp([]key.Binding{
+	binds := []key.Binding{
 		core.Hint("scroll", core.Keys.Up, core.Keys.Down),
 		core.Hint("layout", keys.Layout),
 		core.Hint("wrap", core.Keys.Wrap),
-		core.Hint("back", core.Keys.Back),
-	})
+	}
+	// A diff carries the repo it's from (DirLocator), so the terminal/open-dir keys fire here —
+	// advertise them before "back".
+	if s.dir != "" {
+		binds = append(binds, core.DirKeyHints()...)
+	}
+	binds = append(binds, core.Hint("back", core.Keys.Back))
+	return sh.BindingHelp(binds)
 }
 
 // ---------- the file picker ----------
