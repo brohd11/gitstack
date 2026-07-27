@@ -20,6 +20,11 @@ import (
 type Scope struct {
 	Label string
 	Repos func(*core.Shared) []repo.Repo
+	// ExcludeRoot suppresses the include-root toggle for this scope: even while include-root is
+	// on, the root is neither offered as a toggle row nor added to the targets. For a scope the
+	// root doesn't belong to — e.g. gdaddon's submodules-only scope, where the root is a
+	// top-level clone, not a submodule. Zero value (false) keeps the root available, as before.
+	ExcludeRoot bool
 }
 
 // RootOption optionally augments the batch menu with an "include root" toggle row. When Repo
@@ -84,7 +89,7 @@ func scopeScreen(sh *core.Shared, scopes []Scope, i int, root RootOption, includ
 // plus the optional root when the include-root toggle is on and the root provider yields one.
 func scopeTargets(scope Scope, root RootOption, includeRoot bool, sh *core.Shared) []repo.Repo {
 	targets := scope.Repos(sh)
-	if includeRoot && root.Repo != nil {
+	if includeRoot && !scope.ExcludeRoot && root.Repo != nil {
 		if r, ok := root.Repo(sh); ok {
 			targets = append(targets, r)
 		}
@@ -129,8 +134,9 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, incl
 	}
 
 	// The include-root row only earns a place when the provider can yield a root (a base that
-	// isn't a checkout adds nothing).
-	if rootOK {
+	// isn't a checkout adds nothing) and the active scope accepts it (a scope may ExcludeRoot —
+	// e.g. a submodules-only scope the root, a clone, has no place in).
+	if rootOK && !scopes[i].ExcludeRoot {
 		state := "off"
 		if includeRoot {
 			state = "on"

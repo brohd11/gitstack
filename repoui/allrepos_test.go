@@ -103,6 +103,13 @@ func TestScopeTargetsIncludeRoot(t *testing.T) {
 	if got := scopeTargets(scope, dryRoot, true, nil); len(got) != 1 {
 		t.Errorf("scopeTargets(ok=false, includeRoot=true) = %+v, want just [nested]", got)
 	}
+	// Toggle on but the scope excludes the root (a clone has no place in a submodules-only
+	// batch): scopes-only, even with a yielding provider.
+	excl := scope
+	excl.ExcludeRoot = true
+	if got := scopeTargets(excl, root, true, nil); len(got) != 1 || got[0].Name != "nested" {
+		t.Errorf("scopeTargets(ExcludeRoot, includeRoot=true) = %+v, want just [nested]", got)
+	}
 }
 
 func TestPastTense(t *testing.T) {
