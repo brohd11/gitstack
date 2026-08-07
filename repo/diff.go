@@ -12,9 +12,10 @@ import (
 // This file captures diffs for the UI to render. It sits apart from the other two
 // git primitives because neither can carry a diff intact:
 //
-//   - GitStream (ops.go) relays through a Reporter, and lineWriter drops empty lines and
-//     trims trailing whitespace. In a diff both are content: a blank context line is a
-//     line, and the leading marker column is the whole format.
+//   - GitStream (ops.go) relays through a Reporter, and its line splitting (in
+//     goutil/stream) drops empty lines and trims trailing whitespace. In a diff both are
+//     content: a blank context line is a line, and the leading marker column is the whole
+//     format.
 //   - gitOutput (repo.go) swallows every error to "", which would render a diff that
 //     failed as a diff that was empty — a clean tree. The difference matters here.
 //

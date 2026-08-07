@@ -21,11 +21,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/brohd11/goutil/stream"
 )
 
 // Reporter is a sink for human-readable progress lines. A CLI prints them to stdout; a
 // TUI funnels them into its log — the engine only calls it, never assumes where they go.
-type Reporter func(format string, args ...any)
+// It's an alias of goutil/stream's Reporter, so a reporter written for one works with the
+// other without conversion.
+type Reporter = stream.Reporter
 
 // Repo is one git checkout a caller wants viewed or operated on: its display name and
 // working directory, plus optional cached state (the checked-out branch and the last-read

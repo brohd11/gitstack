@@ -1,12 +1,10 @@
 package repo
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"os/exec"
 	"strconv"
-	"strings"
+
+	"github.com/brohd11/goutil/stream"
 )
 
 // This file holds the git operations that *change* a repo (pull/push/commit) or stream
@@ -21,23 +19,10 @@ import (
 // words folded in, since that's the part worth reading). stdout and stderr are interleaved
 // the way a terminal would show them — git writes progress and errors to stderr, and a
 // caller streaming to a log wants both. ctx cancellation kills the subprocess, which is how
-// a TUI's task-abort works.
+// a TUI's task-abort works. The streaming machinery itself (line splitting, the flush, the
+// error folding) lives in goutil/stream; this is just the git-shaped call into it.
 func GitStream(ctx context.Context, dir string, report Reporter, args ...string) error {
-	w := &lineWriter{report: report}
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = gitEnv()
-	cmd.Stdout = w
-	cmd.Stderr = w
-
-	err := cmd.Run()
-	w.flush() // a final line with no trailing newline (git's "fatal: …" often has none)
-	if err != nil {
-		if last := w.last; last != "" {
-			return fmt.Errorf("%w: %s", err, last)
-		}
-		return err
-	}
-	return nil
+	return stream.Cmd(ctx, "", gitEnv(), report, append([]string{"git", "-C", dir}, args...)...)
 }
 
 // GitStatus streams the working tree's state: `status -sb`, the short form with a branch
@@ -81,46 +66,4 @@ func GitCommit(ctx context.Context, dir, message string, stageAll bool, report R
 	}
 	report("%s", "$ git commit -a -m "+strconv.Quote(message))
 	return GitStream(ctx, dir, report, "commit", "-a", "-m", message)
-}
-
-// lineWriter turns a subprocess's byte stream into whole lines for a Reporter. git delimits
-// its progress output ("Receiving objects:  47%…") with carriage returns rather than
-// newlines, so both count as line breaks — otherwise a clone's entire progress meter would
-// arrive as one unreadable line. It keeps the last line reported so a failing command can
-// quote git's parting words in its error.
-type lineWriter struct {
-	report Reporter
-	buf    []byte
-	last   string
-}
-
-func (w *lineWriter) Write(p []byte) (int, error) {
-	w.buf = append(w.buf, p...)
-	for {
-		i := bytes.IndexAny(w.buf, "\r\n")
-		if i < 0 {
-			break
-		}
-		w.emit(string(w.buf[:i]))
-		w.buf = w.buf[i+1:]
-	}
-	return len(p), nil
-}
-
-// flush emits whatever partial line is left once the command has exited.
-func (w *lineWriter) flush() {
-	if len(w.buf) > 0 {
-		w.emit(string(w.buf))
-		w.buf = nil
-	}
-}
-
-func (w *lineWriter) emit(line string) {
-	line = strings.TrimRight(line, " \t")
-	if line == "" {
-		return
-	}
-	w.last = line
-	// "%s" rather than the line as a format string: git's output can contain a literal %.
-	w.report("%s", line)
 }
