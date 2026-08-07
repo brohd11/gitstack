@@ -184,7 +184,11 @@ func newCommitForm(r repo.Repo) *components.FormScreen {
 			if len(commitable(changes, stageAll)) == 0 {
 				return core.SetStatusAndLog("nothing to commit in this mode")
 			}
-			return core.Push(newCommitConfirm(r, msg, stageAll))
+			confirm, err := newCommitConfirm(r, msg, stageAll)
+			if err != nil {
+				return core.SeqErr(err, core.Async(f.Focus("message")))
+			}
+			return core.Push(confirm)
 		},
 	})
 }
@@ -202,9 +206,14 @@ func commitable(changes []repo.GitChange, stageAll bool) []repo.GitChange {
 }
 
 // newCommitConfirm shows exactly what the commit will contain — and, when the mode excludes
-// them, exactly which new files it will leave behind.
-func newCommitConfirm(r repo.Repo, msg string, stageAll bool) *components.DialogScreen {
-	changes, _ := repo.GitChanges(r.Dir) // re-read: the tree may have moved since the form opened
+// them, exactly which new files it will leave behind. The re-read error is returned, not
+// swallowed: a confirm built on a failed read would claim "Commit 0 file(s)" while OnYes
+// commits the real tree — misrepresenting the one thing this screen exists to show.
+func newCommitConfirm(r repo.Repo, msg string, stageAll bool) (*components.DialogScreen, error) {
+	changes, err := repo.GitChanges(r.Dir) // re-read: the tree may have moved since the form opened
+	if err != nil {
+		return nil, err
+	}
 	return components.CreateConfirmScreen(components.ConfirmSimple{
 		// No Crumb: it defaults to "Conf", so the trail reads "Git › Commit › Conf" rather
 		// than repeating "Commit" twice.
@@ -213,7 +222,7 @@ func newCommitConfirm(r repo.Repo, msg string, stageAll bool) *components.Dialog
 			func(ctx context.Context, dir string, report repo.Reporter) error {
 				return repo.GitCommit(ctx, dir, msg, stageAll, report)
 			})),
-	})
+	}), nil
 }
 
 // maxCommitList caps each file list in the confirm body. A DialogScreen neither scrolls nor
