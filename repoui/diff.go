@@ -270,10 +270,11 @@ func (s *DiffScreen) HelpView(sh *core.Shared) string {
 // action the diff was read to inform — reading a diff is the step before committing. The
 // trail reads "… › Git › Diff", and since esc is a one-level pop, the alternative (pushing
 // the picker alone) would make you esc to the list and re-enter via the Git key to reach the
-// action the diff just argued for.
-func DiffAction(sh *core.Shared, r repo.Repo) core.Action {
+// action the diff just argued for. crumb is forwarded to the seeded Git menu (see RepoMenu),
+// so the trail reads "… › <repo> › Diff" when the host passes the repo name.
+func DiffAction(sh *core.Shared, r repo.Repo, crumb ...string) core.Action {
 	return core.Seq(
-		core.Push(RepoMenu(sh, r)),
+		core.Push(RepoMenu(sh, r, crumb...)),
 		core.Push(DiffMenu(sh, r)),
 	)
 }

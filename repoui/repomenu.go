@@ -30,11 +30,17 @@ const stageAllIndex = 1
 // current local git state (recomputed via the engine on build), so the menu itself answers
 // "what shape is this repo in" before you pick anything. PopStop makes it the hub the
 // sub-flows (task screens, the commit form) return to. It rebuilds on RefreshMsg so popping
-// out of a finished pull doesn't land on rows that still say "3 behind".
-func RepoMenu(sh *core.Shared, r repo.Repo) *components.PickerScreen {
+// out of a finished pull doesn't land on rows that still say "3 behind". The breadcrumb
+// segment defaults to "Git"; hosts that reach the menu directly (a repo row, "ctrl+v") pass
+// a crumb — the repo name — so the trail still says where you are.
+func RepoMenu(sh *core.Shared, r repo.Repo, crumb ...string) *components.PickerScreen {
+	crumbSeg := "Git"
+	if len(crumb) > 0 && crumb[0] != "" {
+		crumbSeg = crumb[0]
+	}
 	return components.NewPicker(repoItems(r), components.PickerOpts{
 		Title:   r.Name,
-		Crumb:   "Git",
+		Crumb:   crumbSeg,
 		Dir:     r.Dir, // "t" opens a terminal at this repo from the Git menu (DirLocator)
 		PopStop: true,
 		Refresh: func(sh *core.Shared, payload any) ([]list.Item, bool) {
