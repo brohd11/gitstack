@@ -26,9 +26,11 @@ func TestParseLsRemoteTags(t *testing.T) {
 			[]string{"v1.0.0"},
 		},
 		{
-			"unsorted input sorted ascending",
-			"aaaaaaa\trefs/tags/v2.0.0\nbbbbbbb\trefs/tags/release-1\nccccccc\trefs/tags/v1.0.0",
-			[]string{"release-1", "v1.0.0", "v2.0.0"},
+			// Newest first, version-aware: v1.10.0 outranks v1.9.9, and a
+			// non-semver name falls below any version.
+			"unsorted input sorted newest first",
+			"aaaaaaa\trefs/tags/v2.0.0\nbbbbbbb\trefs/tags/release-1\nccccccc\trefs/tags/v1.0.0\nddddddd\trefs/tags/v1.10.0\neeeeeee\trefs/tags/v1.9.9",
+			[]string{"v2.0.0", "v1.10.0", "v1.9.9", "v1.0.0", "release-1"},
 		},
 		{
 			"duplicate refs deduped",
@@ -44,6 +46,66 @@ func TestParseLsRemoteTags(t *testing.T) {
 	} {
 		if got := parseLsRemoteTags(tc.out); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("parseLsRemoteTags(%s) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCompareVersionTags(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want int
+	}{
+		{"v1.0.0", "v1.0.0", 0},
+		// Numeric runs compare by value, not lexically.
+		{"v1.10.0", "v1.9.9", 1},
+		{"v2.0.0", "v1.9.9", 1},
+		// A numeric run sorts before a literal one.
+		{"1.0.1", "v1.0.1", -1},
+		// A shared prefix loses to the longer tag.
+		{"1.0.1", "1.0.1.1", -1},
+		// Literal runs compare lexically.
+		{"release-1", "v1.0.0", -1},
+		// Leading zeros don't change the value.
+		{"v1.01.0", "v1.1.0", 0},
+	} {
+		if got := compareVersionTags(tc.a, tc.b); got != tc.want {
+			t.Errorf("compareVersionTags(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+		if got := compareVersionTags(tc.b, tc.a); got != -tc.want {
+			t.Errorf("compareVersionTags(%q, %q) = %d, want %d", tc.b, tc.a, got, -tc.want)
+		}
+	}
+}
+
+func TestNextTag(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		local, remote []string
+		want          string
+	}{
+		{"no tags", nil, nil, ""},
+		{"no semver tags", []string{"release-1", "nightly"}, nil, ""},
+		{"patch bump", []string{"1.0.1"}, nil, "1.0.2"},
+		{"v prefix preserved", []string{"v2.3.9"}, nil, "v2.3.10"},
+		{"patch rolls past 9", []string{"v1.0.9"}, nil, "v1.0.10"},
+		{
+			"remote higher than local wins",
+			[]string{"v1.0.5"}, []string{"v1.10.0"},
+			"v1.10.1",
+		},
+		{
+			"local higher than remote wins",
+			[]string{"2.0.0"}, []string{"v1.9.9"},
+			"2.0.1",
+		},
+		{
+			"non-semver tags ignored",
+			[]string{"latest", "1.0.1"}, []string{"1.0"},
+			"1.0.2",
+		},
+	} {
+		if got := NextTag(tc.local, tc.remote); got != tc.want {
+			t.Errorf("NextTag(%s) = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }

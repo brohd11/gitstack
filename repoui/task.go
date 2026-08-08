@@ -70,6 +70,10 @@ func failureLabel(verb string) string {
 		return "push failed"
 	case "committed":
 		return "commit failed"
+	case "tagged":
+		return "tag failed"
+	case "deleted":
+		return "delete failed"
 	}
 	return verb + " failed"
 }
