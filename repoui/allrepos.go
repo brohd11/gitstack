@@ -156,7 +156,9 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, incl
 		items = append(items, components.Item{
 			Name: "⚙ Scope: " + scopes[i].Label,
 			Desc: "enter to cycle → " + scopes[next].Label,
-			Pick: func(sh *core.Shared) core.Action { return core.Replace(scopeScreen(sh, scopes, next, root, includeRoot)) },
+			Pick: func(sh *core.Shared) core.Action {
+				return core.Replace(scopeScreen(sh, scopes, next, root, includeRoot))
+			},
 		})
 	}
 	return items
@@ -167,8 +169,10 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, incl
 // newBatchConfirm lists every repo the operation will touch, then runs the batch on confirm.
 func newBatchConfirm(scopes []Scope, i int, root RootOption, includeRoot bool, verb, label string, run func(context.Context, string, repo.Reporter) error) *components.DialogScreen {
 	return components.CreateConfirmScreen(components.ConfirmSimple{
-		Crumb:  "Confirm",
-		Render: func(sh *core.Shared) string { return sh.Box(confirmBody(verb, scopeTargets(scopes[i], root, includeRoot, sh))) },
+		Crumb: "Confirm",
+		Render: func(sh *core.Shared) string {
+			return sh.Box(confirmBody(verb, scopeTargets(scopes[i], root, includeRoot, sh)))
+		},
 		OnYesLamda: func(sh *core.Shared) core.Action {
 			return core.Replace(newBatchTask(scopes, i, root, includeRoot, verb, label, run))
 		},

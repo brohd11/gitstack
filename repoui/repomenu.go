@@ -95,6 +95,11 @@ func repoItems(r repo.Repo) []list.Item {
 			Desc: commitDesc(dir),
 			Pick: func(sh *core.Shared) core.Action { return core.Push(newCommitForm(r)) },
 		},
+		components.Item{
+			Name: "@ Tags",
+			Desc: tagsDesc(dir),
+			Pick: func(sh *core.Shared) core.Action { return core.Push(TagsScreen(sh, r)) },
+		},
 	}
 }
 
@@ -137,6 +142,13 @@ func commitDesc(dir string) string {
 		return "working tree is clean"
 	}
 	return fmt.Sprintf("commit %d changed file(s)", len(changes))
+}
+
+func tagsDesc(dir string) string {
+	if tags := repo.LocalTags(dir); len(tags) > 0 {
+		return fmt.Sprintf("%d local tag(s)", len(tags))
+	}
+	return "no local tags"
 }
 
 // ---------- commit ----------
