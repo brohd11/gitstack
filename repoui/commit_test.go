@@ -89,7 +89,7 @@ func TestCommitBodyCleanNoBranch(t *testing.T) {
 // concretely — so without the widened lookup a typed message would read back as "" here
 // and OnSubmit would reject every commit as missing a message.
 func TestCommitFormMessageRoundTrips(t *testing.T) {
-	f := newCommitForm(rp("dialogic", "main"))
+	f, _ := newCommitForm(rp("dialogic", "main"))
 	sh := core.NewShared(nil)
 	f.Init(sh) // the form opens focused on the message field
 

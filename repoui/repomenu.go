@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // The per-repo Git submenu: the routine half of working on a checkout — see what changed,
@@ -93,7 +94,7 @@ func repoItems(r repo.Repo) []list.Item {
 		components.Item{
 			Name: "✎ Commit",
 			Desc: commitDesc(dir),
-			Pick: func(sh *core.Shared) core.Action { return core.Push(newCommitForm(r)) },
+			Pick: func(sh *core.Shared) core.Action { return core.Push(newCommitScreen(r)) },
 		},
 		components.Item{
 			Name: "@ Tags",
@@ -156,8 +157,10 @@ func tagsDesc(dir string) string {
 // newCommitForm asks for the message and what to stage. The staging toggle is not a
 // convenience: `git commit -a` stages only *tracked* files, so a file you just created would
 // silently miss the commit. Rather than pick a surprise for the user, the form makes the
-// choice explicit and the confirm screen shows its consequences.
-func newCommitForm(r repo.Repo) *components.FormScreen {
+// choice explicit and the confirm screen shows its consequences. The toggle is returned
+// alongside the form so the host screen (newCommitScreen) can watch it and keep the
+// file list in sync.
+func newCommitForm(r repo.Repo) (*components.FormScreen, *components.ToggleField) {
 	// A commit message is the one field long enough to need it: NewTextAreaField wraps and
 	// grows downward where NewTextField would scroll the start of the line out of view.
 	msgF := components.NewTextAreaField("message", "Message: ", "what changed?")
@@ -202,7 +205,98 @@ func newCommitForm(r repo.Repo) *components.FormScreen {
 			}
 			return core.Push(confirm)
 		},
-	})
+	}), stageF
+}
+
+// newCommitScreen is the commit form as a ModularScreen: the form itself up top,
+// and below it a scrolling list of the files the commit will contain — the
+// answer the confirm screen could only truncate (maxCommitList), live, following
+// the stage toggle. The form's own behavior (validate → confirm → task) is
+// unchanged; esc still cancels, enter still submits.
+func newCommitScreen(r repo.Repo) *components.ModularScreen {
+	form, stageF := newCommitForm(r)
+	files := components.NewScrollContainer("Files to Commit")
+	panel := &commitPanel{
+		ScreenPanel: components.NewScreenPanel(form),
+		form:        form,
+		stage:       stageF,
+		files:       files,
+		dir:         r.Dir,
+		last:        stageF.Index(),
+	}
+	panel.refreshFiles()
+	return components.NewModularScreen(
+		[][]components.Slot{
+			// The form renders only as tall as its box; Expand hands the file
+			// list whatever rows the form doesn't use, so the pane reaches the
+			// bottom of the terminal instead of pooling slack below it.
+			{{Panel: panel, Weight: 1}, {Panel: files, Weight: 1, Expand: true}},
+		},
+		components.ModularOpts{
+			Crumb:     "Commit",
+			Dir:       r.Dir,
+			ColWidths: []int{0}, // one flex column: full width
+		},
+	)
+}
+
+// commitPanel is the commit form's ScreenPanel plus the two domain behaviors a
+// component can't carry: keeping the sibling file list in sync with the stage
+// toggle, and releasing tab to the host's pane cycle when the form isn't
+// typing. (While the message field is focused, tab stays the form's next-field
+// key; on the toggle row it moves focus to the file list.)
+type commitPanel struct {
+	*components.ScreenPanel
+	form  *components.FormScreen
+	stage *components.ToggleField
+	files *components.ScrollContainer
+	dir   string
+	last  int // last-seen stage toggle index
+}
+
+var _ components.Panel = (*commitPanel)(nil)
+var _ components.Focusable = (*commitPanel)(nil)
+var _ components.PanelUpdater = (*commitPanel)(nil)
+var _ components.Capturing = (*commitPanel)(nil)
+
+func (p *commitPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, bool) {
+	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "tab" && !p.form.Typing() {
+		return core.Action{}, false // not typing: release to the host's pane cycle
+	}
+	act, handled := p.ScreenPanel.UpdatePanel(sh, msg)
+	if idx := p.stage.Index(); idx != p.last {
+		p.last = idx
+		p.refreshFiles()
+	}
+	return act, handled
+}
+
+// refreshFiles rebuilds the file list for the current staging mode, mirroring
+// the confirm body's sections: the files the commit will contain, then — when
+// "-a" leaves new files behind — the untracked set it won't, so the exclusion
+// is visible before submit, not just at confirm. Uncapped (fileLines max 0):
+// scrolling is the point of the pane. Empty and error states render as a
+// status line instead.
+func (p *commitPanel) refreshFiles() {
+	changes, err := repo.GitChanges(p.dir)
+	if err != nil {
+		p.files.SetStatus(err.Error())
+		return
+	}
+	stageAll := p.stage.Index() == stageAllIndex
+	in := commitable(changes, stageAll)
+	if len(in) == 0 {
+		p.files.SetStatus("nothing to commit in this mode")
+		return
+	}
+	lines := fileLines(in, 0)
+	if !stageAll {
+		if untracked := excludedUntracked(changes); len(untracked) > 0 {
+			lines = append(lines, "", "Not included — new files, which \"-a\" does not stage:")
+			lines = append(lines, fileLines(untracked, 0)...)
+		}
+	}
+	p.files.SetLines(lines)
 }
 
 // commitable is the subset of changes the chosen staging mode will actually commit: with
@@ -254,31 +348,40 @@ func commitBody(r repo.Repo, changes []repo.GitChange, msg string, stageAll bool
 	}
 
 	lines := []string{head + ":", ""}
-	lines = append(lines, fileLines(included)...)
+	lines = append(lines, fileLines(included, maxCommitList)...)
 
 	if !stageAll {
-		var untracked []repo.GitChange
-		for _, c := range changes {
-			if c.Untracked() {
-				untracked = append(untracked, c)
-			}
-		}
-		if len(untracked) > 0 {
+		if untracked := excludedUntracked(changes); len(untracked) > 0 {
 			lines = append(lines, "", "Not included — new files, which \"-a\" does not stage.")
 			lines = append(lines, "Pick \"all, incl. new files\" to commit these too:", "")
-			lines = append(lines, fileLines(untracked)...)
+			lines = append(lines, fileLines(untracked, maxCommitList)...)
 		}
 	}
 
 	return strings.Join(append(lines, "", "message: "+msg), "\n")
 }
 
-// fileLines renders up to maxCommitList "  XY path" rows, then says how many it left out.
-func fileLines(changes []repo.GitChange) []string {
+// excludedUntracked is the set "-a" leaves behind: the untracked changes. The
+// confirm body names them as a warning; the commit screen's file pane lists them
+// below the included files, same idea, live.
+func excludedUntracked(changes []repo.GitChange) []repo.GitChange {
+	var out []repo.GitChange
+	for _, c := range changes {
+		if c.Untracked() {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// fileLines renders "  XY path" rows, capped at max rows with a trailing
+// "… and N more" when it truncates; max <= 0 renders them all (the commit
+// screen's scrolling pane, where truncating would defeat the point).
+func fileLines(changes []repo.GitChange, max int) []string {
 	n := len(changes)
 	shown := n
-	if shown > maxCommitList {
-		shown = maxCommitList
+	if max > 0 && shown > max {
+		shown = max
 	}
 	lines := make([]string, 0, shown+1)
 	for _, c := range changes[:shown] {
