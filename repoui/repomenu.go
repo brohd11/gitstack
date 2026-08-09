@@ -246,11 +246,11 @@ func newCommitScreen(r repo.Repo) *components.ModularScreen {
 	)
 }
 
-// commitPanel is the commit form's ScreenPanel plus the two domain behaviors a
+// commitPanel is the commit form's ScreenPanel plus the one domain behavior a
 // component can't carry: keeping the sibling file list in sync with the stage
-// toggle, and releasing tab to the host's pane cycle when the form isn't
-// typing. (While the message field is focused, tab stays the form's next-field
-// key; on the toggle row it moves focus to the file list.)
+// toggle. It used to release tab to the host's pane cycle as well; the host owns
+// shift+arrows now instead, so tab is unconditionally the form's next-field key
+// and the file list is shift+↓ away from any row.
 type commitPanel struct {
 	*components.ScreenPanel
 	form  *components.FormScreen
@@ -266,9 +266,6 @@ var _ components.PanelUpdater = (*commitPanel)(nil)
 var _ components.Capturing = (*commitPanel)(nil)
 
 func (p *commitPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, bool) {
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "tab" && !p.form.Typing() {
-		return core.Action{}, false // not typing: release to the host's pane cycle
-	}
 	act, handled := p.ScreenPanel.UpdatePanel(sh, msg)
 	if idx := p.stage.Index(); idx != p.last {
 		p.last = idx
