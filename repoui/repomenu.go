@@ -236,7 +236,7 @@ func newCommitScreen(r repo.Repo) *components.ModularScreen {
 			// The form renders only as tall as its box; Expand hands the file
 			// list whatever rows the form doesn't use, so the pane reaches the
 			// bottom of the terminal instead of pooling slack below it.
-			{{Panel: panel, Weight: 1}, {Panel: files, Weight: 1, Expand: true}},
+			{{Panel: panel, Weight: 1}, {Panel: files, Weight: 1, ExpandV: true}},
 		},
 		components.ModularOpts{
 			Crumb:     "Commit",
