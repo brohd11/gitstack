@@ -3,7 +3,7 @@ module github.com/brohd11/gitstack
 go 1.26.4
 
 require (
-	github.com/brohd11/bubblestack v0.1.5
+	github.com/brohd11/bubblestack v0.1.6
 	github.com/brohd11/goutil v0.1.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -31,6 +31,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	github.com/yuin/goldmark v1.8.5 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
