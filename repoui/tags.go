@@ -212,16 +212,15 @@ func newTagForm(r repo.Repo, remote *tagListPanel) *components.FormScreen {
 func deleteTagPicker(r repo.Repo) *components.PickerScreen {
 	var items []list.Item
 	for _, t := range repo.LocalTags(r.Dir) {
-		tag := t
 		items = append(items, components.Item{
-			Name: tag,
+			Name: t,
 			Desc: "delete this local tag",
 			Pick: func(*core.Shared) core.Action {
 				return core.Push(components.CreateConfirmScreen(components.ConfirmSimple{
-					Text: "Delete local tag " + tag + " in " + r.Name + "?\n\nIf it was never pushed, it's gone for good.",
-					OnYes: core.Replace(Task("deleting tag "+tag+"…", "deleted", r.Dir,
+					Text: "Delete local tag " + t + " in " + r.Name + "?\n\nIf it was never pushed, it's gone for good.",
+					OnYes: core.Replace(Task("deleting tag "+t+"…", "deleted", r.Dir,
 						func(ctx context.Context, dir string, report repo.Reporter) error {
-							return repo.GitDeleteTag(ctx, dir, tag, report)
+							return repo.GitDeleteTag(ctx, dir, t, report)
 						})),
 				}))
 			},
@@ -251,14 +250,13 @@ func pushTagPicker(r repo.Repo, remote []string) *components.PickerScreen {
 		if onRemote[t] {
 			continue
 		}
-		tag := t
 		items = append(items, components.Item{
-			Name: tag,
-			Desc: "git push origin " + tag,
+			Name: t,
+			Desc: "git push origin " + t,
 			Pick: func(*core.Shared) core.Action {
-				return core.Push(Task("pushing tag "+tag+"…", "pushed", r.Dir,
+				return core.Push(Task("pushing tag "+t+"…", "pushed", r.Dir,
 					func(ctx context.Context, dir string, report repo.Reporter) error {
-						return repo.GitPushTag(ctx, dir, tag, report)
+						return repo.GitPushTag(ctx, dir, t, report)
 					}))
 			},
 		})

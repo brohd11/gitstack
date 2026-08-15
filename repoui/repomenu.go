@@ -3,6 +3,7 @@ package repoui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
@@ -22,9 +23,12 @@ import (
 
 // stageOptions is the commit form's staging toggle, in index order. The default (index 0) is
 // the conservative one — see repo.GitCommit for why the distinction is load-bearing.
-var stageOptions = []string{"tracked changes (-a)", "all, incl. new files (-A)"}
+const stageAllOption = "all, incl. new files (-A)"
 
-const stageAllIndex = 1
+var stageOptions = []string{"tracked changes (-a)", stageAllOption}
+
+// Derived from the slice, not hardcoded: reordering stageOptions can't silently flip -a/-A.
+var stageAllIndex = slices.Index(stageOptions, stageAllOption)
 
 // RepoMenu builds the Git command hub for one checkout. Each row's Desc reads the repo's
 // current local git state (recomputed via the engine on build), so the menu itself answers

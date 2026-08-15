@@ -17,7 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -226,7 +226,7 @@ func FetchAll(ctx context.Context, repos []Repo) []FetchResult {
 		}(r.Name, r.Dir)
 	}
 	wg.Wait()
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b FetchResult) int { return strings.Compare(a.Name, b.Name) })
 	return out
 }
 

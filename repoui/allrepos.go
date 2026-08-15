@@ -62,11 +62,14 @@ func scopeScreen(sh *core.Shared, scopes []Scope, i int, root RootOption, includ
 		scopes = []Scope{{Label: "repos", Repos: func(*core.Shared) []repo.Repo { return nil }}}
 		i = 0
 	}
-	rootOK := false
-	if root.Repo != nil {
-		_, rootOK = root.Repo(sh)
+	rootOK := func(sh *core.Shared) bool {
+		if root.Repo == nil {
+			return false
+		}
+		_, ok := root.Repo(sh)
+		return ok
 	}
-	return components.NewPicker(menuItems(scopes, i, scopeTargets(scopes[i], root, includeRoot, sh), root, includeRoot, rootOK), components.PickerOpts{
+	return components.NewPicker(menuItems(scopes, i, scopeTargets(scopes[i], root, includeRoot, sh), root, includeRoot, rootOK(sh)), components.PickerOpts{
 		Title:   "Git — all repos (" + scopes[i].Label + ")",
 		Crumb:   "Git all",
 		PopStop: true,
@@ -76,11 +79,7 @@ func scopeScreen(sh *core.Shared, scopes []Scope, i int, root RootOption, includ
 			if _, ok := payload.(RefreshMsg); !ok {
 				return nil, false
 			}
-			rootOK := false
-			if root.Repo != nil {
-				_, rootOK = root.Repo(sh)
-			}
-			return menuItems(scopes, i, scopeTargets(scopes[i], root, includeRoot, sh), root, includeRoot, rootOK), true
+			return menuItems(scopes, i, scopeTargets(scopes[i], root, includeRoot, sh), root, includeRoot, rootOK(sh)), true
 		},
 	})
 }
@@ -173,7 +172,7 @@ func newBatchConfirm(scopes []Scope, i int, root RootOption, includeRoot bool, v
 		Render: func(sh *core.Shared) string {
 			return sh.Box(confirmBody(verb, scopeTargets(scopes[i], root, includeRoot, sh)))
 		},
-		OnYesLamda: func(sh *core.Shared) core.Action {
+		OnYesLambda: func(sh *core.Shared) core.Action {
 			return core.Replace(newBatchTask(scopes, i, root, includeRoot, verb, label, run))
 		},
 	})

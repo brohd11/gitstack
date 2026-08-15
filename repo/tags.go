@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -77,8 +77,8 @@ func parseLsRemoteTags(out string) []string {
 			tags = append(tags, name)
 		}
 	}
-	sort.SliceStable(tags, func(i, j int) bool {
-		return compareVersionTags(tags[i], tags[j]) > 0
+	slices.SortStableFunc(tags, func(a, b string) int {
+		return -compareVersionTags(a, b) // newest first
 	})
 	return tags
 }

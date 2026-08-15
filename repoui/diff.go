@@ -303,13 +303,14 @@ func diffItems(r repo.Repo) []list.Item {
 	}
 	// Untracked files aren't in `diff HEAD`, so they have no numstat; the rows fall back
 	// to "new file" for them rather than showing a misleading 0/0.
-	stats, _ := repo.DiffStats(r.Dir)
+	stats, statsErr := repo.DiffStats(r.Dir)
+	statsFailed := statsErr != nil
 
 	items := make([]list.Item, 0, len(changes)+1)
 	if len(changes) > 0 {
 		items = append(items, components.Item{
 			Name: "◫ " + r.Name,
-			Desc: allFilesDesc(changes, stats),
+			Desc: allFilesDesc(changes, stats, statsFailed),
 			// untracked=true: this row counts the untracked files in its description and
 			// says "every change", so it has to ask for the diff that includes them.
 			Pick: func(*core.Shared) core.Action {
@@ -321,7 +322,7 @@ func diffItems(r repo.Repo) []list.Item {
 	for _, c := range changes {
 		items = append(items, components.Item{
 			Name: c.Code + "  " + c.Path,
-			Desc: fileDesc(c, stats[c.Path]),
+			Desc: fileDesc(c, stats[c.Path], statsFailed),
 			Pick: func(*core.Shared) core.Action {
 				return core.Push(NewDiffScreen(c.Path, r.Dir, c.Path, c.Untracked()))
 			},
@@ -331,8 +332,12 @@ func diffItems(r repo.Repo) []list.Item {
 }
 
 // allFilesDesc totals the counts across every file, so the top row reports the size of the
-// change before you open it.
-func allFilesDesc(changes []repo.GitChange, stats map[string]repo.DiffStat) string {
+// change before you open it. A failed numstat read (statsFailed) would total to a misleading
+// "no line changes", so it says nothing about counts instead.
+func allFilesDesc(changes []repo.GitChange, stats map[string]repo.DiffStat, statsFailed bool) string {
+	if statsFailed {
+		return fmt.Sprintf("every change in one page — %s", plural(len(changes), "file"))
+	}
 	var added, deleted int
 	for _, st := range stats {
 		added += st.Added
@@ -341,10 +346,14 @@ func allFilesDesc(changes []repo.GitChange, stats map[string]repo.DiffStat) stri
 	return fmt.Sprintf("every change in one page — %s, %s", plural(len(changes), "file"), counts(added, deleted))
 }
 
-func fileDesc(c repo.GitChange, st repo.DiffStat) string {
+func fileDesc(c repo.GitChange, st repo.DiffStat, statsFailed bool) string {
 	switch {
 	case c.Untracked():
 		return "new file — not tracked yet"
+	case statsFailed:
+		// A failed numstat read surfaces here as a zero DiffStat; name the failure rather
+		// than misdescribing real changes as "no textual changes".
+		return "could not read the line counts"
 	case st.Binary:
 		return "binary file"
 	case st.Added == 0 && st.Deleted == 0:
