@@ -193,7 +193,7 @@ func newTagForm(r repo.Repo, remote *tagListPanel) *components.FormScreen {
 					return core.SetStatusAndLog("tag " + name + " already exists on origin")
 				}
 			}
-			return core.Replace(Task("tagging "+name+"…", "tagged", r.Dir,
+			return core.Replace(Task("tagging "+name+"…", opTag, r.Dir,
 				func(ctx context.Context, dir string, report repo.Reporter) error {
 					return repo.GitTag(ctx, dir, name, report)
 				}))
@@ -218,7 +218,7 @@ func deleteTagPicker(r repo.Repo) *components.PickerScreen {
 			Pick: func(*core.Shared) core.Action {
 				return core.Push(components.CreateConfirmScreen(components.ConfirmSimple{
 					Text: "Delete local tag " + t + " in " + r.Name + "?\n\nIf it was never pushed, it's gone for good.",
-					OnYes: core.Replace(Task("deleting tag "+t+"…", "deleted", r.Dir,
+					OnYes: core.Replace(Task("deleting tag "+t+"…", opDelete, r.Dir,
 						func(ctx context.Context, dir string, report repo.Reporter) error {
 							return repo.GitDeleteTag(ctx, dir, t, report)
 						})),
@@ -254,7 +254,7 @@ func pushTagPicker(r repo.Repo, remote []string) *components.PickerScreen {
 			Name: t,
 			Desc: "git push origin " + t,
 			Pick: func(*core.Shared) core.Action {
-				return core.Push(Task("pushing tag "+t+"…", "pushed", r.Dir,
+				return core.Push(Task("pushing tag "+t+"…", opPush, r.Dir,
 					func(ctx context.Context, dir string, report repo.Reporter) error {
 						return repo.GitPushTag(ctx, dir, t, report)
 					}))

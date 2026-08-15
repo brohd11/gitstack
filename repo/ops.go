@@ -22,7 +22,7 @@ import (
 // a TUI's task-abort works. The streaming machinery itself (line splitting, the flush, the
 // error folding) lives in goutil/stream; this is just the git-shaped call into it.
 func GitStream(ctx context.Context, dir string, report Reporter, args ...string) error {
-	return stream.Cmd(ctx, "", gitEnv(), report, append([]string{"git", "-C", dir}, args...)...)
+	return stream.Cmd(ctx, "", GitEnv(), report, append([]string{"git", "-C", dir}, args...)...)
 }
 
 // GitStatus streams the working tree's state: `status -sb`, the short form with a branch

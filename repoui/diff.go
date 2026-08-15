@@ -8,6 +8,7 @@ import (
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
+	"github.com/brohd11/goutil/strutil"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -370,9 +371,9 @@ func counts(added, deleted int) string {
 	return fmt.Sprintf("+%d  -%d", added, deleted)
 }
 
+// plural renders "1 file" / "3 files" for the diff header's counts. It formats the whole
+// count, which is why it stays here: the shared strutil.Plural only picks the noun form,
+// and does the "s" branch inside.
 func plural(n int, noun string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, noun)
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
+	return fmt.Sprintf("%d %s", n, strutil.Plural(n, noun, noun+"s"))
 }

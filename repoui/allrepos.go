@@ -109,26 +109,26 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, incl
 	n := len(targets)
 	noun := scopes[i].Label
 
-	op := func(label, verb string, run func(context.Context, string, repo.Reporter) error, desc string) components.Item {
+	op := func(o Op, label string, run func(context.Context, string, repo.Reporter) error, desc string) components.Item {
 		return components.Item{
 			Name: label,
 			Desc: desc,
 			Pick: func(sh *core.Shared) core.Action {
 				if len(scopeTargets(scopes[i], root, includeRoot, sh)) == 0 {
-					return core.SetStatusAndLog("no " + noun + " to " + verb)
+					return core.SetStatusAndLog("no " + noun + " to " + o.present)
 				}
-				return core.Push(newBatchConfirm(scopes, i, root, includeRoot, verb, label, run))
+				return core.Push(newBatchConfirm(scopes, i, root, includeRoot, o, label, run))
 			},
 		}
 	}
 
 	items := []list.Item{
-		op("⟳ Fetch all", "fetch", func(ctx context.Context, dir string, _ repo.Reporter) error {
+		op(opFetch, "⟳ Fetch all", func(ctx context.Context, dir string, _ repo.Reporter) error {
 			return repo.GitFetch(ctx, dir)
 		}, fmt.Sprintf("update remote refs for %d %s", n, noun)),
-		op("⇩ Pull all", "pull", repo.GitPull,
+		op(opPull, "⇩ Pull all", repo.GitPull,
 			fmt.Sprintf("fast-forward — %d of %d %s behind origin", behind, n, noun)),
-		op("⇧ Push all", "push", repo.GitPush,
+		op(opPush, "⇧ Push all", repo.GitPush,
 			fmt.Sprintf("push local commits — %d of %d %s ahead", ahead, n, noun)),
 	}
 
@@ -166,14 +166,14 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, incl
 // ---------- confirm + batch ----------
 
 // newBatchConfirm lists every repo the operation will touch, then runs the batch on confirm.
-func newBatchConfirm(scopes []Scope, i int, root RootOption, includeRoot bool, verb, label string, run func(context.Context, string, repo.Reporter) error) *components.DialogScreen {
+func newBatchConfirm(scopes []Scope, i int, root RootOption, includeRoot bool, o Op, label string, run func(context.Context, string, repo.Reporter) error) *components.DialogScreen {
 	return components.CreateConfirmScreen(components.ConfirmSimple{
 		Crumb: "Confirm",
 		Render: func(sh *core.Shared) string {
-			return sh.Box(confirmBody(verb, scopeTargets(scopes[i], root, includeRoot, sh)))
+			return sh.Box(confirmBody(o, scopeTargets(scopes[i], root, includeRoot, sh)))
 		},
 		OnYesLambda: func(sh *core.Shared) core.Action {
-			return core.Replace(newBatchTask(scopes, i, root, includeRoot, verb, label, run))
+			return core.Replace(newBatchTask(scopes, i, root, includeRoot, o, label, run))
 		},
 	})
 }
@@ -184,9 +184,9 @@ const maxConfirmList = 12
 
 // confirmBody renders the confirm text: how many repos, then each with the divergence that
 // makes it worth acting on. A pure function of its inputs, so it's testable and owns the cap.
-func confirmBody(verb string, targets []repo.Repo) string {
-	head := fmt.Sprintf("%s %d repo(s)", titleWord(verb), len(targets))
-	if verb == "pull" {
+func confirmBody(o Op, targets []repo.Repo) string {
+	head := fmt.Sprintf("%s %d repo(s)", titleWord(o.present), len(targets))
+	if o == opPull {
 		head += " — fast-forward only"
 	}
 	lines := []string{head + ":", ""}
@@ -203,27 +203,27 @@ func confirmBody(verb string, targets []repo.Repo) string {
 		}
 	}
 	for _, t := range targets[:shown] {
-		lines = append(lines, fmt.Sprintf("  %-*s  %s", width, t.Name, syncNote(verb, t.Sync)))
+		lines = append(lines, fmt.Sprintf("  %-*s  %s", width, t.Name, syncNote(o, t.Sync)))
 	}
 	if n := len(targets) - shown; n > 0 {
 		lines = append(lines, fmt.Sprintf("  … and %d more", n))
 	}
 
-	if verb == "pull" {
+	if o == opPull {
 		lines = append(lines, "", "A repo that has diverged will fail and be skipped; nothing else is touched.")
 	}
 	return strings.Join(lines, "\n")
 }
 
 // syncNote annotates a repo in the confirm with the count relevant to the operation.
-func syncNote(verb string, s repo.GitSync) string {
-	switch verb {
-	case "pull":
+func syncNote(o Op, s repo.GitSync) string {
+	switch o {
+	case opPull:
 		if s.Behind > 0 {
 			return fmt.Sprintf("%d behind origin", s.Behind)
 		}
 		return "up to date"
-	case "push":
+	case opPush:
 		if s.Ahead > 0 {
 			return fmt.Sprintf("%d to push", s.Ahead)
 		}
@@ -233,12 +233,12 @@ func syncNote(verb string, s repo.GitSync) string {
 	}
 }
 
-// newBatchTask runs verb over every repo in scope, sequentially, streaming each repo's output
-// under its own header. Sequential is deliberate: interleaved output from concurrent pulls is
-// unreadable, and reading what git said is the whole point of this screen (the concurrent,
-// no-confirm path is a caller's fetch key). ctx is checked between repos so esc abandons the
-// rest.
-func newBatchTask(scopes []Scope, i int, root RootOption, includeRoot bool, verb, label string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
+// newBatchTask runs the operation over every repo in scope, sequentially, streaming each
+// repo's output under its own header. Sequential is deliberate: interleaved output from
+// concurrent pulls is unreadable, and reading what git said is the whole point of this
+// screen (the concurrent, no-confirm path is a caller's fetch key). ctx is checked between
+// repos so esc abandons the rest.
+func newBatchTask(scopes []Scope, i int, root RootOption, includeRoot bool, o Op, label string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
 	var done, failed int
 	run := func(ctx context.Context, sh *core.Shared, report func(string, ...any), doneCh chan<- core.TaskEvent) {
 		targets := scopeTargets(scopes[i], root, includeRoot, sh)
@@ -252,7 +252,7 @@ func newBatchTask(scopes []Scope, i int, root RootOption, includeRoot bool, verb
 			}
 			report("── %s ──", t.Name)
 			if err := op(ctx, t.Dir, report); err != nil {
-				report("  %s failed: %v", verb, err)
+				report("  %s: %v", o.failure, err)
 				failed++
 				continue
 			}
@@ -261,7 +261,7 @@ func newBatchTask(scopes []Scope, i int, root RootOption, includeRoot bool, verb
 		doneCh <- core.TaskEvent{Done: true}
 	}
 	onDone := func(sh *core.Shared, ev core.TaskEvent) core.Action {
-		summary := fmt.Sprintf("%s %d repo(s)", pastTense(verb), done)
+		summary := fmt.Sprintf("%s %d repo(s)", o.past, done)
 		if failed > 0 {
 			summary += fmt.Sprintf(" · %d failed", failed)
 		}

@@ -16,7 +16,7 @@ import (
 //     goutil/stream) drops empty lines and trims trailing whitespace. In a diff both are
 //     content: a blank context line is a line, and the leading marker column is the whole
 //     format.
-//   - gitOutput (repo.go) swallows every error to "", which would render a diff that
+//   - GitOutput (repo.go) swallows every error to "", which would render a diff that
 //     failed as a diff that was empty — a clean tree. The difference matters here.
 //
 // So these capture whole stdout, byte for byte, and keep the error.
@@ -185,7 +185,7 @@ func DiffStats(dir string) (map[string]DiffStat, error) {
 // would silently render every untracked file as empty.
 func gitCapture(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = gitEnv()
+	cmd.Env = GitEnv()
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 

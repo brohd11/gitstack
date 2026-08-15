@@ -13,7 +13,7 @@ func tgt(name string, ahead, behind int) repo.Repo {
 }
 
 func TestConfirmBodyPull(t *testing.T) {
-	body := confirmBody("pull", []repo.Repo{
+	body := confirmBody(opPull, []repo.Repo{
 		tgt("dialogic", 0, 2),
 		tgt("phantom_camera", 0, 0),
 		tgt("debug_draw", 0, 1),
@@ -33,7 +33,7 @@ func TestConfirmBodyPull(t *testing.T) {
 }
 
 func TestConfirmBodyPush(t *testing.T) {
-	body := confirmBody("push", []repo.Repo{
+	body := confirmBody(opPush, []repo.Repo{
 		tgt("dialogic", 3, 0),
 		tgt("phantom_camera", 0, 0),
 	})
@@ -50,7 +50,7 @@ func TestConfirmBodyPush(t *testing.T) {
 
 func TestConfirmBodyFetchNoAnnotations(t *testing.T) {
 	// Fetch acts on all repos regardless of state, so no per-repo count is meaningful.
-	body := confirmBody("fetch", []repo.Repo{tgt("a", 5, 5), tgt("b", 0, 0)})
+	body := confirmBody(opFetch, []repo.Repo{tgt("a", 5, 5), tgt("b", 0, 0)})
 	if !strings.Contains(body, "Fetch 2 repo(s):") {
 		t.Errorf("missing header:\n%s", body)
 	}
@@ -64,7 +64,7 @@ func TestConfirmBodyCaps(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		many = append(many, tgt("repo"+string(rune('a'+i)), 0, 1))
 	}
-	body := confirmBody("pull", many)
+	body := confirmBody(opPull, many)
 	if n := strings.Count(body, "behind origin"); n != maxConfirmList {
 		t.Errorf("listed %d repos, want cap of %d:\n%s", n, maxConfirmList, body)
 	}
@@ -112,10 +112,25 @@ func TestScopeTargetsIncludeRoot(t *testing.T) {
 	}
 }
 
-func TestPastTense(t *testing.T) {
-	for verb, want := range map[string]string{"fetch": "fetched", "pull": "pulled", "push": "pushed"} {
-		if got := pastTense(verb); got != want {
-			t.Errorf("pastTense(%q) = %q, want %q", verb, got, want)
+// The Op table is the whole point of the type — a typo in it is the one failure mode the
+// compiler can't catch, so every form of every op is pinned here.
+func TestOpForms(t *testing.T) {
+	tests := []struct {
+		op                     Op
+		present, past, failure string
+	}{
+		{opStatus, "status", "", "git status failed"},
+		{opFetch, "fetch", "fetched", "fetch failed"},
+		{opPull, "pull", "pulled", "pull failed"},
+		{opPush, "push", "pushed", "push failed"},
+		{opCommit, "commit", "committed", "commit failed"},
+		{opTag, "tag", "tagged", "tag failed"},
+		{opDelete, "delete", "deleted", "delete failed"},
+	}
+	for _, tc := range tests {
+		if tc.op.present != tc.present || tc.op.past != tc.past || tc.op.failure != tc.failure {
+			t.Errorf("op %q = {%q, %q, %q}, want {%q, %q, %q}",
+				tc.present, tc.op.present, tc.op.past, tc.op.failure, tc.present, tc.past, tc.failure)
 		}
 	}
 }

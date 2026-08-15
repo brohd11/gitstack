@@ -3,7 +3,6 @@ package repo
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,7 +13,7 @@ import (
 // so a caller renders "no local tags" without having to distinguish failure from
 // empty.
 func LocalTags(dir string) []string {
-	out := gitOutput(dir, "tag", "--list", "--sort=-creatordate")
+	out := GitOutput(dir, "tag", "--list", "--sort=-creatordate")
 	if out == "" {
 		return nil
 	}
@@ -35,17 +34,11 @@ func LocalTags(dir string) []string {
 // question shouldn't mutate anything anyway. It's a network call, so like
 // GitFetch it takes a ctx and folds git's stderr into the error.
 func RemoteTags(ctx context.Context, dir string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "ls-remote", "--tags", "origin")
-	cmd.Env = gitEnv()
-	out, err := cmd.CombinedOutput()
+	out, err := runGitCtx(ctx, dir, "ls-remote", "--tags", "origin")
 	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			return nil, err
-		}
-		return nil, fmt.Errorf("%w: %s", err, msg)
+		return nil, err
 	}
-	return parseLsRemoteTags(string(out)), nil
+	return parseLsRemoteTags(out), nil
 }
 
 // parseLsRemoteTags turns `git ls-remote --tags` output into a deduped list of

@@ -64,9 +64,9 @@ func repoItems(r repo.Repo) []list.Item {
 	dirty := repo.HasUncommittedChanges(dir)
 
 	// A task row: run op, stream git's output to the log, refresh the state on success.
-	task := func(label, verb string, op func(context.Context, string, repo.Reporter) error) func(*core.Shared) core.Action {
+	task := func(label string, o Op, op func(context.Context, string, repo.Reporter) error) func(*core.Shared) core.Action {
 		return func(*core.Shared) core.Action {
-			return core.Push(Task(label, verb, dir, op))
+			return core.Push(Task(label, o, dir, op))
 		}
 	}
 
@@ -74,7 +74,7 @@ func repoItems(r repo.Repo) []list.Item {
 		components.Item{
 			Name: "⟳ Fetch",
 			Desc: "update this repo's remote refs (the whole project: \"f\" on the list)",
-			Pick: task("fetching "+name+"…", "fetched", func(ctx context.Context, dir string, report repo.Reporter) error {
+			Pick: task("fetching "+name+"…", opFetch, func(ctx context.Context, dir string, report repo.Reporter) error {
 				report("fetching %s…", name)
 				return repo.GitFetch(ctx, dir)
 			}),
@@ -82,7 +82,7 @@ func repoItems(r repo.Repo) []list.Item {
 		components.Item{
 			Name: "◉ Status",
 			Desc: statusDesc(dirty),
-			Pick: task("reading status…", "", repo.GitStatus),
+			Pick: task("reading status…", opStatus, repo.GitStatus),
 		},
 		components.Item{
 			// Sits under Status because it answers the next question: Status names the
@@ -94,12 +94,12 @@ func repoItems(r repo.Repo) []list.Item {
 		components.Item{
 			Name: "⇩ Pull",
 			Desc: pullDesc(sync),
-			Pick: task("pulling "+name+"…", "pulled", repo.GitPull),
+			Pick: task("pulling "+name+"…", opPull, repo.GitPull),
 		},
 		components.Item{
 			Name: "⇧ Push",
 			Desc: pushDesc(sync),
-			Pick: task("pushing "+name+"…", "pushed", repo.GitPush),
+			Pick: task("pushing "+name+"…", opPush, repo.GitPush),
 		},
 		components.Item{
 			Name: "✎ Commit",
@@ -331,7 +331,7 @@ func newCommitConfirm(r repo.Repo, msg string, stageAll bool) (*components.Dialo
 		// No Crumb: it defaults to "Conf", so the trail reads "Git › Commit › Conf" rather
 		// than repeating "Commit" twice.
 		Text: commitBody(r, changes, msg, stageAll),
-		OnYes: core.Replace(Task("committing "+r.Name+"…", "committed", r.Dir,
+		OnYes: core.Replace(Task("committing "+r.Name+"…", opCommit, r.Dir,
 			func(ctx context.Context, dir string, report repo.Reporter) error {
 				return repo.GitCommit(ctx, dir, msg, stageAll, report)
 			})),

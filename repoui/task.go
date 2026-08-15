@@ -25,15 +25,38 @@ import (
 // dirty / ahead / behind. It carries no payload — it's a pure "reload yourself" marker.
 type RefreshMsg struct{}
 
+// Op is one git operation's vocabulary — present, past, and failure forms — declared once,
+// side by side. The screens used to pass bare verb strings and bridge the forms with lookup
+// functions (pastTense, failureLabel), where a typo silently degraded to verb+"ed"; now a
+// screen passes an Op, so a misspelled verb is a compile error and every user-visible form
+// of an operation lives next to its siblings.
+type Op struct {
+	present string // "pull" — mid-flow phrasing ("no repos to pull", "Pull 3 repo(s)")
+	past    string // "pulled" — the success status; "" when the op only reports (status)
+	failure string // "pull failed" — the failure status line
+}
+
+// The operations the screens run. opStatus's empty past is the marker Task reads as "only
+// reports — no success status line of its own".
+var (
+	opStatus = Op{present: "status", failure: "git status failed"}
+	opFetch  = Op{present: "fetch", past: "fetched", failure: "fetch failed"}
+	opPull   = Op{present: "pull", past: "pulled", failure: "pull failed"}
+	opPush   = Op{present: "push", past: "pushed", failure: "push failed"}
+	opCommit = Op{present: "commit", past: "committed", failure: "commit failed"}
+	opTag    = Op{present: "tag", past: "tagged", failure: "tag failed"}
+	opDelete = Op{present: "delete", past: "deleted", failure: "delete failed"}
+)
+
 // Task runs one git operation on one repo, streaming its output into the shared log (report's
 // lines land there and the pane reveals itself). It's a *stay* task: the whole point is to
 // read what git said — especially when it refused — so the screen holds until esc rather than
 // yanking the output away on completion.
 //
-// verb is the past tense for the success status ("pulled"); an empty verb means the operation
-// only reports (Status) and gets no status line of its own. On success it broadcasts
-// RefreshMsg so any list's markers settle.
-func Task(label, verb, dir string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
+// o supplies the status vocabulary: o.past is the success status ("pulled"), o.failure the
+// failure one; an empty o.past means the operation only reports (status) and gets no success
+// status line of its own. On success it broadcasts RefreshMsg so any list's markers settle.
+func Task(label string, o Op, dir string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
 	run := func(ctx context.Context, sh *core.Shared, report func(string, ...any), done chan<- core.TaskEvent) {
 		done <- core.TaskEvent{Done: true, Err: op(ctx, dir, report)}
 	}
@@ -41,13 +64,13 @@ func Task(label, verb, dir string, op func(context.Context, string, repo.Reporte
 		if ev.Err != nil {
 			// git's own words are already in the log above; the status line only has to say
 			// where to go next. Nothing was changed — --ff-only and a failed push guarantee it.
-			return core.SetStatusAndLog(failureLabel(verb) + " — resolve it in a terminal (t)")
+			return core.SetStatusAndLog(o.failure + " — resolve it in a terminal (t)")
 		}
-		if verb == "" {
+		if o.past == "" {
 			return core.PropagateAll(RefreshMsg{})
 		}
 		return core.Seq(
-			core.SetStatus(verb),
+			core.SetStatus(o.past),
 			core.PropagateAll(RefreshMsg{}),
 		)
 	}
@@ -55,40 +78,6 @@ func Task(label, verb, dir string, op func(context.Context, string, repo.Reporte
 	ts := components.NewStayTask(label, "done — esc to go back", run, onDone, onDismiss)
 	ts.Dir = dir // "t" opens a terminal at this repo — where a failed op says to resolve it (DirLocator)
 	return ts
-}
-
-// failureLabel names the failed operation from its success verb ("pulled" → "pull failed").
-func failureLabel(verb string) string {
-	switch verb {
-	case "":
-		return "git status failed"
-	case "fetched":
-		return "fetch failed"
-	case "pulled":
-		return "pull failed"
-	case "pushed":
-		return "push failed"
-	case "committed":
-		return "commit failed"
-	case "tagged":
-		return "tag failed"
-	case "deleted":
-		return "delete failed"
-	}
-	return verb + " failed"
-}
-
-// pastTense renders an operation verb for a completion summary ("pull" → "pulled").
-func pastTense(verb string) string {
-	switch verb {
-	case "fetch":
-		return "fetched"
-	case "pull":
-		return "pulled"
-	case "push":
-		return "pushed"
-	}
-	return verb + "ed"
 }
 
 // titleWord capitalizes the first letter of an ASCII verb ("pull" → "Pull").

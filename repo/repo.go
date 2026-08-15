@@ -55,7 +55,7 @@ func CurrentBranch(dir string) string {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return ""
 	}
-	if b := gitOutput(dir, "rev-parse", "--abbrev-ref", "HEAD"); b != "" && b != "HEAD" {
+	if b := GitOutput(dir, "rev-parse", "--abbrev-ref", "HEAD"); b != "" && b != "HEAD" {
 		return b
 	}
 	return ""
@@ -131,7 +131,7 @@ func HasUncommittedChanges(dir string) bool {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return false
 	}
-	return gitOutput(dir, "status", "--porcelain") != ""
+	return GitOutput(dir, "status", "--porcelain") != ""
 }
 
 // GitSync is a checkout's divergence from its upstream tracking branch, as of the last
@@ -148,7 +148,7 @@ type GitSync struct {
 
 // GitSyncStatus reports dir's divergence from its upstream. The zero value (Tracking
 // false) covers every case with nothing to compare: not a checkout, a detached HEAD, or a
-// branch that tracks nothing — gitOutput folds all of those into an empty string.
+// branch that tracks nothing — GitOutput folds all of those into an empty string.
 func GitSyncStatus(dir string) GitSync {
 	// An empty dir would resolve ".git" against the process's cwd — which may well be a
 	// repo — and report a wholly unrelated checkout's divergence.
@@ -161,7 +161,7 @@ func GitSyncStatus(dir string) GitSync {
 	// --left-right --count over the symmetric difference prints "<left>\t<right>": commits
 	// reachable from the upstream but not HEAD (behind), then from HEAD but not the
 	// upstream (ahead).
-	out := gitOutput(dir, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
+	out := GitOutput(dir, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
 	fields := strings.Fields(out)
 	if len(fields) != 2 {
 		return GitSync{}
@@ -176,22 +176,13 @@ func GitSyncStatus(dir string) GitSync {
 
 // GitFetch updates dir's remote-tracking refs from its remote, so a following
 // GitSyncStatus reports a current ahead/behind. It's the one network-bound git call in
-// this file, hence the ctx (cancel/deadline) and the explicit error — gitOutput can't
+// this file, hence the ctx (cancel/deadline) and the explicit error — GitOutput can't
 // serve here, since it has neither. GIT_TERMINAL_PROMPT=0 (as on the clone paths) makes a
 // repo whose credentials aren't cached fail fast rather than block forever on an
 // interactive prompt no TUI can answer.
 func GitFetch(ctx context.Context, dir string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "fetch")
-	cmd.Env = gitEnv()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			return err
-		}
-		return fmt.Errorf("%w: %s", err, msg)
-	}
-	return nil
+	_, err := runGitCtx(ctx, dir, "fetch")
+	return err
 }
 
 // FetchResult is one repo's outcome from FetchAll: the fetch error (nil on success) and
@@ -317,9 +308,10 @@ func GitChanges(dir string) ([]GitChange, error) {
 	return changes, nil
 }
 
-// gitOutput runs a read-only `git -C dir <args...>` and returns its trimmed stdout,
-// or "" on any error (a folder may be a repo with no origin, etc.).
-func gitOutput(dir string, args ...string) string {
+// GitOutput runs a read-only `git -C dir <args...>` and returns its trimmed stdout,
+// or "" on any error (a folder may be a repo with no origin, etc.). Exported for callers
+// that need the same tolerant one-shot probe outside this engine.
+func GitOutput(dir string, args ...string) string {
 	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
 	if err != nil {
 		return ""
@@ -327,13 +319,34 @@ func gitOutput(dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// gitEnv is the environment every git subprocess this engine spawns runs with. Both
+// GitEnv is the environment every git subprocess this engine spawns runs with. Both
 // settings exist to guarantee git can never sit waiting for input a TUI has no way to
 // supply: GIT_TERMINAL_PROMPT=0 makes a repo with uncached credentials fail instead of
 // prompting, and GIT_EDITOR=true makes any path that would open an editor (a merge message,
-// say) take the empty-editor exit rather than hanging behind the UI forever.
-func gitEnv() []string {
+// say) take the empty-editor exit rather than hanging behind the UI forever. Exported for
+// callers that must spawn their own git subprocesses (e.g. gdaddon), so they inherit the
+// same never-prompt guarantee instead of re-spelling it.
+func GitEnv() []string {
 	return append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_EDITOR=true")
+}
+
+// runGitCtx runs a cancellable `git -C dir <args...>` under GitEnv and returns its combined
+// output verbatim. On error git's own words are folded into it (`%w: %s`) when it said
+// anything — that's the part worth reading — and the bare error is returned otherwise.
+// It backs the network calls (GitFetch, RemoteTags), which can't use GitOutput: they take
+// a ctx and their errors must reach the caller, not fold to "".
+func runGitCtx(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = GitEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: %s", err, msg)
+	}
+	return string(out), nil
 }
 
 // pathDepth is the number of path segments from base to path (0 when equal).
