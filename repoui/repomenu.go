@@ -92,6 +92,14 @@ func repoItems(r repo.Repo) []list.Item {
 			Pick: func(sh *core.Shared) core.Action { return core.Push(DiffMenu(sh, r)) },
 		},
 		components.Item{
+			// Last of the three read-only rows, and it follows Diff for the same reason
+			// Diff follows Status: Diff is what changed and hasn't been committed, Log is
+			// what already was.
+			Name: "≡ Log",
+			Desc: logDesc(dir),
+			Pick: func(sh *core.Shared) core.Action { return core.Push(NewLogScreen(r)) },
+		},
+		components.Item{
 			Name: "⇩ Pull",
 			Desc: pullDesc(sync),
 			Pick: task("pulling "+name+"…", opPull, repo.GitPull),
@@ -145,6 +153,16 @@ func diffDesc(dir string) string {
 		return "nothing has changed since the last commit"
 	}
 	return fmt.Sprintf("see what changed in %d file(s)", len(changes))
+}
+
+// logDesc is the last commit, which is both the description of what the row opens and the
+// most useful single line of it. GitOutput yields "" on any error, which is also what a repo
+// with no commits produces — and "no commits yet" is the right answer to both.
+func logDesc(dir string) string {
+	if last := repo.GitOutput(dir, "log", "-1", "--pretty=%h %s"); last != "" {
+		return "history — last: " + last
+	}
+	return "no commits yet"
 }
 
 func commitDesc(dir string) string {
