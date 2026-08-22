@@ -113,3 +113,80 @@ func TestCommitable(t *testing.T) {
 		t.Errorf("commitable(-a) over untracked-only = %v, want empty", got)
 	}
 }
+
+var untrackedOnlyChanges = []repo.GitChange{
+	{Code: "??", Path: "new_event.gd"},
+	{Code: "??", Path: "new_char.gd"},
+}
+
+// TestCommitPaneUntrackedOnly is the regression: "-a" over a tree whose only changes are
+// new files used to render a bare status line, hiding the very files the mode excludes.
+func TestCommitPaneUntrackedOnly(t *testing.T) {
+	lines := strings.Join(commitPaneLines(untrackedOnlyChanges, false), "\n")
+
+	if !strings.Contains(lines, "No existing files to commit") {
+		t.Errorf("the pane should say the mode commits nothing:\n%s", lines)
+	}
+	if !strings.Contains(lines, "Not included") {
+		t.Errorf("the pane should still head the excluded section:\n%s", lines)
+	}
+	for _, want := range []string{"new_event.gd", "new_char.gd"} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("the pane must name the new file %q it leaves out:\n%s", want, lines)
+		}
+	}
+}
+
+func TestCommitPaneUntrackedOnlyStageAll(t *testing.T) {
+	lines := strings.Join(commitPaneLines(untrackedOnlyChanges, true), "\n")
+
+	if strings.Contains(lines, "No existing files to commit") || strings.Contains(lines, "Not included") {
+		t.Errorf("-A commits the new files, so neither notice belongs:\n%s", lines)
+	}
+	if !strings.Contains(lines, "new_event.gd") {
+		t.Errorf("-A should list the new file as included:\n%s", lines)
+	}
+}
+
+// TestCommitPaneMixed: the populated shape is unchanged — tracked rows, then the
+// exclusion section under "-a", one list under "-A".
+func TestCommitPaneMixed(t *testing.T) {
+	tracked := strings.Join(commitPaneLines(sampleChanges, false), "\n")
+	if strings.Contains(tracked, "No existing files to commit") {
+		t.Errorf("there are tracked files here; the empty-state line must not appear:\n%s", tracked)
+	}
+	for _, want := range []string{"timeline.gd", "old.gd", "Not included", "new_event.gd"} {
+		if !strings.Contains(tracked, want) {
+			t.Errorf("the -a pane is missing %q:\n%s", want, tracked)
+		}
+	}
+
+	all := strings.Join(commitPaneLines(sampleChanges, true), "\n")
+	if strings.Contains(all, "Not included") {
+		t.Errorf("-A excludes nothing; there should be no exclusion notice:\n%s", all)
+	}
+}
+
+// TestCommitPaneClean: no changes at all yields no lines, which is the caller's cue to
+// show a status line instead of an empty box.
+func TestCommitPaneClean(t *testing.T) {
+	for _, stageAll := range []bool{false, true} {
+		if got := commitPaneLines(nil, stageAll); len(got) != 0 {
+			t.Errorf("commitPaneLines(clean, stageAll=%v) = %v, want empty", stageAll, got)
+		}
+	}
+}
+
+// TestCommitPaneTitle: the count rides the border in both modes — "-a" excludes new
+// files and "-A" buries them at the bottom, so either way they are easy to miss.
+func TestCommitPaneTitle(t *testing.T) {
+	if got := commitPaneTitle(sampleChanges); got != "Files to Commit (1 new)" {
+		t.Errorf("commitPaneTitle = %q, want the new-file count on the legend", got)
+	}
+	if got := commitPaneTitle(untrackedOnlyChanges); got != "Files to Commit (2 new)" {
+		t.Errorf("commitPaneTitle = %q, want 2 new", got)
+	}
+	if got := commitPaneTitle(sampleChanges[:2]); got != commitFilesTitle {
+		t.Errorf("commitPaneTitle(no untracked) = %q, want the bare title", got)
+	}
+}

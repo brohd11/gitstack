@@ -243,7 +243,7 @@ func newCommitForm(r repo.Repo) (*components.FormScreen, *components.ToggleField
 // unchanged; esc still cancels, enter still submits.
 func newCommitScreen(r repo.Repo) *components.ModularScreen {
 	form, stageF := newCommitForm(r)
-	files := components.NewScrollContainer("Files to Commit")
+	files := components.NewScrollContainer(commitFilesTitle)
 	panel := &commitPanel{
 		ScreenPanel: components.NewScreenPanel(form),
 		form:        form,
@@ -296,32 +296,63 @@ func (p *commitPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, bo
 	return act, handled
 }
 
-// refreshFiles rebuilds the file list for the current staging mode, mirroring
-// the confirm body's sections: the files the commit will contain, then — when
-// "-a" leaves new files behind — the untracked set it won't, so the exclusion
-// is visible before submit, not just at confirm. Uncapped (fileLines max 0):
-// scrolling is the point of the pane. Empty and error states render as a
-// status line instead.
+// commitFilesTitle is the file pane's legend with nothing to flag; commitPaneTitle
+// counts new files onto it.
+const commitFilesTitle = "Files to Commit"
+
+// refreshFiles rebuilds the file pane for the current staging mode: its legend, then
+// its body. Only a failed read or a clean tree renders as a status line — every state
+// that has files in it lists them.
 func (p *commitPanel) refreshFiles() {
 	changes, err := repo.GitChanges(p.dir)
 	if err != nil {
+		p.files.SetTitle(commitFilesTitle)
 		p.files.SetStatus(err.Error())
 		return
 	}
-	stageAll := p.stage.Index() == stageAllIndex
-	in := commitable(changes, stageAll)
-	if len(in) == 0 {
-		p.files.SetStatus("nothing to commit in this mode")
+	p.files.SetTitle(commitPaneTitle(changes))
+	lines := commitPaneLines(changes, p.stage.Index() == stageAllIndex)
+	if len(lines) == 0 {
+		p.files.SetStatus("nothing to commit — the working tree is clean")
 		return
 	}
-	lines := fileLines(in, 0)
-	if !stageAll {
-		if untracked := excludedUntracked(changes); len(untracked) > 0 {
-			lines = append(lines, "", "Not included — new files, which \"-a\" does not stage:")
-			lines = append(lines, fileLines(untracked, 0)...)
-		}
-	}
 	p.files.SetLines(lines)
+}
+
+// commitPaneLines is the pane's body, mirroring the confirm body's sections: the files
+// the commit will contain, then — when "-a" leaves new files behind — the untracked set
+// it won't, so the exclusion is visible before submit, not just at confirm. Uncapped
+// (fileLines max 0): scrolling is the point of the pane. A mode that commits nothing
+// still lists the new files under a line saying so, rather than going blank at the one
+// moment they are the only thing in the tree. Empty result ⇒ nothing changed at all,
+// and the caller shows a status line instead.
+func commitPaneLines(changes []repo.GitChange, stageAll bool) []string {
+	included := commitable(changes, stageAll)
+	untracked := excludedUntracked(changes)
+	if len(included) == 0 && len(untracked) == 0 {
+		return nil
+	}
+
+	lines := fileLines(included, 0)
+	if len(included) == 0 {
+		lines = []string{"No existing files to commit"}
+	}
+	if !stageAll && len(untracked) > 0 {
+		lines = append(lines, "", "Not included — new files, which \"-a\" does not stage:")
+		lines = append(lines, fileLines(untracked, 0)...)
+	}
+	return lines
+}
+
+// commitPaneTitle counts new files onto the pane's legend. It does so in both modes:
+// "-a" excludes them and "-A" buries them at the end of a list that scrolls, so either
+// way the border is the only place their presence is visible without reading to the
+// bottom.
+func commitPaneTitle(changes []repo.GitChange) string {
+	if n := len(excludedUntracked(changes)); n > 0 {
+		return fmt.Sprintf("%s (%d new)", commitFilesTitle, n)
+	}
+	return commitFilesTitle
 }
 
 // commitable is the subset of changes the chosen staging mode will actually commit: with
