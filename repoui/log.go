@@ -210,10 +210,7 @@ func (s *LogScreen) HelpView(sh *core.Shared) string {
 		core.Hint("wrap", core.Keys.Wrap),
 	}
 	// The log carries the repo it's from (DirLocator), so the terminal/open-dir keys fire
-	// here — advertise them before "back".
-	if s.dir != "" {
-		binds = append(binds, core.DirKeyHints()...)
-	}
+	// here, but they stay off the bar — it is kept sparse (see core.ShortHelp).
 	binds = append(binds, core.Hint("back", core.Keys.Back))
 	return sh.BindingHelp(binds)
 }
