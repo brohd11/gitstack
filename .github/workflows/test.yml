@@ -12,6 +12,22 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: go mod tidy -diff
+      - name: Check go.mod/go.sum are tidy
+        run: go mod tidy -diff
 
-      - run: go test ./...
+      # gofmt reports by printing paths and always exits 0, so an empty output is the
+      # pass and the check has to be spelled out rather than run bare.
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "unformatted -- run gofmt -w ."
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...

@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/brohd11/goutil/stream"
+	"github.com/brohd11/goutil/strutil"
 )
 
 // Reporter is a sink for human-readable progress lines. A CLI prints them to stdout; a
@@ -239,7 +240,7 @@ func FindGitRepos(base string, maxDepth int) ([]string, error) {
 		if d.Name() == ".git" {
 			return filepath.SkipDir
 		}
-		if pathDepth(base, path) > maxDepth {
+		if strutil.Depth(base, path) > maxDepth {
 			return filepath.SkipDir
 		}
 		if path == base {
@@ -347,13 +348,4 @@ func runGitCtx(ctx context.Context, dir string, args ...string) (string, error) 
 		return "", fmt.Errorf("%w: %s", err, msg)
 	}
 	return string(out), nil
-}
-
-// pathDepth is the number of path segments from base to path (0 when equal).
-func pathDepth(base, path string) int {
-	rel, err := filepath.Rel(base, path)
-	if err != nil || rel == "." {
-		return 0
-	}
-	return strings.Count(rel, string(os.PathSeparator)) + 1
 }
