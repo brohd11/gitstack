@@ -10,11 +10,11 @@ import (
 	"github.com/brohd11/gitstack/repo"
 	"github.com/brohd11/goutil/strutil"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // The Diff view: what the Status row can't answer. `git status` names the files that
@@ -99,7 +99,7 @@ func NewDiffScreen(title, dir, path string, untracked bool) *DiffScreen {
 	s := &DiffScreen{
 		title: title,
 		dir:   dir,
-		vp:    viewport.New(0, 0),
+		vp:    viewport.New(),
 		width: -1,
 	}
 
@@ -154,8 +154,8 @@ func (s *DiffScreen) SetSize(_ *core.Shared, width, bodyHeight int) {
 	if h < 1 {
 		h = 1
 	}
-	s.vp.Width = width
-	s.vp.Height = h
+	s.vp.SetWidth(width)
+	s.vp.SetHeight(h)
 	if width == s.width {
 		return // height-only change (the output pane opening): the content is unaffected
 	}
@@ -174,7 +174,7 @@ func (s *DiffScreen) rerender() {
 	// layouts differ in height: side by side puts an edit's two halves on one row, so
 	// switching to it from a position near the end of a long unified diff would otherwise
 	// leave the offset past the last line.
-	y := s.vp.YOffset
+	y := s.vp.YOffset()
 	s.vp.SetContent(s.body())
 	s.vp.SetYOffset(y)
 }

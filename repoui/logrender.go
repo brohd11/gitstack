@@ -7,7 +7,7 @@ import (
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // Rendering the commit log. Pure functions over []repo.Commit — no bubbletea, no viewport —
@@ -34,11 +34,11 @@ const msgIndent = "    "
 // against the user's own 16-color palette is what makes them match the terminal they're
 // sitting in. core.Theme's five colors are framework roles and shouldn't grow git vocabulary.
 const (
-	shaColor    = lipgloss.Color("3") // yellow, git's commit color
-	headColor   = lipgloss.Color("6") // cyan
-	branchColor = lipgloss.Color("2") // green
-	remoteColor = lipgloss.Color("1") // red
-	tagColor    = lipgloss.Color("3") // yellow, bolded to separate it from the sha
+	shaColor    = lipgloss.ANSIColor(3) // yellow, git's commit color
+	headColor   = lipgloss.ANSIColor(6) // cyan
+	branchColor = lipgloss.ANSIColor(2) // green
+	remoteColor = lipgloss.ANSIColor(1) // red
+	tagColor    = lipgloss.ANSIColor(3) // yellow, bolded to separate it from the sha
 )
 
 // Styles are built per call, never cached — see the note in diffrender.go: a cached

@@ -6,8 +6,7 @@ import (
 
 	"github.com/brohd11/gitstack/repo"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -51,7 +50,7 @@ func logScreen(t *testing.T, truncated bool) *LogScreen {
 		dir:       "/tmp/gitstack",
 		commits:   sampleCommits,
 		truncated: truncated,
-		vp:        viewport.New(0, 0),
+		vp:        viewport.New(),
 		width:     -1,
 	}
 	s.SetSize(nil, logWidth, 40)
@@ -59,7 +58,7 @@ func logScreen(t *testing.T, truncated bool) *LogScreen {
 }
 
 func pressMode(s *LogScreen) {
-	s.Update(nil, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	s.Update(nil, keyMsg("m"))
 }
 
 // The default mode is the whole point of the screen: opening it gives you as many commits
@@ -174,18 +173,18 @@ func TestLogTogglePreservesScroll(t *testing.T) {
 	s := &LogScreen{
 		title:   "gitstack",
 		commits: repeatCommits(30),
-		vp:      viewport.New(0, 0),
+		vp:      viewport.New(),
 		width:   -1,
 	}
 	s.SetSize(nil, logWidth, 8)
 	s.vp.SetYOffset(3)
 
 	pressMode(s) // standard
-	if got := s.vp.YOffset; got != 3 {
+	if got := s.vp.YOffset(); got != 3 {
 		t.Fatalf("YOffset after toggling to standard = %d, want 3", got)
 	}
 	pressMode(s) // and back
-	if got := s.vp.YOffset; got != 3 {
+	if got := s.vp.YOffset(); got != 3 {
 		t.Errorf("YOffset after toggling back = %d, want 3 — the toggle scrolled the view", got)
 	}
 }
@@ -205,7 +204,7 @@ func TestLogEmptyStateRenders(t *testing.T) {
 	s := &LogScreen{
 		title: "gitstack",
 		empty: "this repo has no commits yet",
-		vp:    viewport.New(0, 0),
+		vp:    viewport.New(),
 		width: -1,
 	}
 	s.SetSize(nil, logWidth, 20)

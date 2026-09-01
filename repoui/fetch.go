@@ -7,7 +7,7 @@ import (
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // FetchTimeout caps a whole fetch-all fan-out, so an unreachable remote can't leave the pass

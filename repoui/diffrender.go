@@ -7,7 +7,7 @@ import (
 
 	"github.com/brohd11/bubblestack/core"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -217,8 +217,8 @@ const eolNote = `\ No newline at end of file`
 // they read correctly under every theme — the same reasoning the "mono" theme uses in
 // leaning on the terminal's colors.
 const (
-	addColor = lipgloss.Color("2")
-	delColor = lipgloss.Color("1")
+	addColor = lipgloss.ANSIColor(2)
+	delColor = lipgloss.ANSIColor(1)
 )
 
 // Built per call from the current palette rather than cached, per the convention in

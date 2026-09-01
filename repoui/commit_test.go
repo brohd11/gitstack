@@ -7,8 +7,6 @@ import (
 
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func rp(name, branch string) repo.Repo {
@@ -94,7 +92,7 @@ func TestCommitFormMessageRoundTrips(t *testing.T) {
 	f.Init(sh) // the form opens focused on the message field
 
 	for _, r := range "fix timeline crash" {
-		f.Update(sh, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		f.Update(sh, keyMsg(string(r)))
 	}
 	if got := f.Value("message"); got != "fix timeline crash" {
 		t.Errorf("a typed commit message should reach OnSubmit, Value = %q", got)

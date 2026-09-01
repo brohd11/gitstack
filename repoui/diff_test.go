@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -24,7 +23,7 @@ func diffScreen(t *testing.T, width int) *DiffScreen {
 	s := &DiffScreen{
 		title: "a.txt",
 		lines: parseDiff(sampleDiff),
-		vp:    viewport.New(0, 0),
+		vp:    viewport.New(),
 		width: -1,
 	}
 	s.SetSize(nil, width, 20)
@@ -37,7 +36,7 @@ func diffScreen(t *testing.T, width int) *DiffScreen {
 // tests care about: quiet or not.
 func pressLayout(t *testing.T, s *DiffScreen) (warned bool) {
 	t.Helper()
-	_, act := s.Update(nil, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	_, act := s.Update(nil, keyMsg("s"))
 	return act.Msg != nil
 }
 

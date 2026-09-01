@@ -7,10 +7,10 @@ import (
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // The Log view: what the rest of this menu can't answer. Status and Diff describe the
@@ -87,7 +87,7 @@ func NewLogScreen(r repo.Repo) *LogScreen {
 	s := &LogScreen{
 		title: r.Name,
 		dir:   r.Dir,
-		vp:    viewport.New(0, 0),
+		vp:    viewport.New(),
 		width: -1,
 	}
 
@@ -128,8 +128,8 @@ func (s *LogScreen) SetSize(_ *core.Shared, width, bodyHeight int) {
 	if h < 1 {
 		h = 1
 	}
-	s.vp.Width = width
-	s.vp.Height = h
+	s.vp.SetWidth(width)
+	s.vp.SetHeight(h)
 	if width == s.width {
 		return // height-only change (the output pane opening): the content is unaffected
 	}
@@ -148,7 +148,7 @@ func (s *LogScreen) rerender() {
 	// in the diff: standard renders each commit as six-odd rows where one line renders it as
 	// one, so toggling back from a position deep in a standard log would otherwise leave the
 	// offset far past the last row.
-	y := s.vp.YOffset
+	y := s.vp.YOffset()
 	s.vp.SetContent(s.body())
 	s.vp.SetYOffset(y)
 }
