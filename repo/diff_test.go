@@ -137,7 +137,8 @@ func TestDiffAllUntrackedDirectory(t *testing.T) {
 	if !strings.Contains(out, "+nested") {
 		t.Errorf("a file inside a new directory belongs in the aggregate diff:\n%s", out)
 	}
-	if !strings.Contains(out, filepath.Join("newdir", "sub", "nested.txt")) {
+	// Git renders repository paths with forward slashes on every platform.
+	if !strings.Contains(out, "newdir/sub/nested.txt") {
 		t.Errorf("the nested file should be named by its own path:\n%s", out)
 	}
 }
