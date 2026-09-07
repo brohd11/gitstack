@@ -22,3 +22,12 @@ import (
     "github.com/brohd11/gitstack/repoui"
 )
 ```
+
+### Cached file status consumers
+
+`repo.ReadWorktreeStatus(ctx, dir)` returns the enclosing checkout's root, per-file
+index/worktree states, rename origins, conflicts, untracked files, and ignored-path
+coverage. It uses NUL-delimited porcelain v2 and supports worktrees and submodules.
+Run it in a background task with a deadline and cache the snapshot for rendering.
+`repo.RepoRootContext` provides cancellable enclosing-repository discovery.
+The existing `GitChanges` API retains its display-oriented behavior.
