@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -42,6 +43,11 @@ func TestReadWorktreeStatus(t *testing.T) {
 	git(t, dir, "add", "tracked.txt")
 	write(t, dir, "tracked.txt", "mixed changes\n")
 	name := "spaced 雪\nfile.txt"
+	if runtime.GOOS == "windows" {
+		// Windows rejects newlines in filenames; the parser covers them in
+		// TestParseWorktreeStatus, so keep just the spaces and non-ASCII here.
+		name = "spaced 雪 file.txt"
+	}
 	write(t, dir, name, "new\n")
 	git(t, dir, "mv", ".gitignore", "renamed ignore")
 	// Restore ignore rules so ignored status remains independently testable.
