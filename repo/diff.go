@@ -29,6 +29,13 @@ import (
 // bare `git diff`) includes staged changes as well as unstaged ones, so the view answers
 // the same question the commit flow asks — what would `commit -a` contain — rather than
 // hiding anything already added to the index.
+//
+// Every diff that names it must follow it with `--`. Without the separator git has to guess
+// whether HEAD is a revision or a path, and it refuses to guess when the working tree holds
+// a matching one: a file or directory literally named HEAD, or — on a case-insensitive
+// filesystem, which is macOS's default — one named `head`. A repo with a `head/` directory
+// in it then gets "fatal: ambiguous argument 'HEAD': both revision and filename" in place of
+// its diff, which is why this is not tidy-up that can be dropped.
 const diffAgainst = "HEAD"
 
 // Diff returns the unified diff of dir's working tree for one path, or for every changed
@@ -52,15 +59,15 @@ func Diff(dir, path string, untracked bool) (string, error) {
 		return diffNoIndex(dir, path)
 	}
 
-	args := []string{"-c", "core.quotepath=false", "diff", diffAgainst}
+	args := []string{"-c", "core.quotepath=false", "diff", diffAgainst, "--"}
 	if path != "" {
-		args = append(args, "--", path)
+		args = append(args, path)
 	}
 	out, err := gitCapture(dir, args...)
 	if err != nil {
 		// A repo with no commits has no HEAD to diff against, and git's own message
-		// ("fatal: ambiguous argument 'HEAD'") explains nothing to someone who just
-		// pressed Diff. Every file is new in that repo, so say that instead.
+		// ("fatal: bad revision 'HEAD'") explains nothing to someone who just pressed
+		// Diff. Every file is new in that repo, so say that instead.
 		if !hasHEAD(dir) {
 			return "", errors.New("this repo has no commits yet — every file is new")
 		}
@@ -85,7 +92,7 @@ func diffAll(dir string) (string, error) {
 	// untracked, so the loop below can still render the whole tree. Only the tracked half
 	// is missing, and it is missing because there is none.
 	if hasHEAD(dir) {
-		out, err := gitCapture(dir, "-c", "core.quotepath=false", "diff", diffAgainst)
+		out, err := gitCapture(dir, "-c", "core.quotepath=false", "diff", diffAgainst, "--")
 		if err != nil {
 			return "", err
 		}
@@ -143,7 +150,7 @@ func DiffStats(dir string) (map[string]DiffStat, error) {
 	if dir == "" {
 		return nil, nil
 	}
-	out, err := gitCapture(dir, "-c", "core.quotepath=false", "diff", "--numstat", diffAgainst)
+	out, err := gitCapture(dir, "-c", "core.quotepath=false", "diff", "--numstat", diffAgainst, "--")
 	if err != nil {
 		if !hasHEAD(dir) {
 			return nil, nil // no commits: every file is new, and new files have no numstat

@@ -188,8 +188,39 @@ func TestDiffStats(t *testing.T) {
 	}
 }
 
+// TestDiffPathNamedHEAD pins the `--` separator. A path in the working tree that matches the
+// revision name makes `git diff HEAD` ambiguous — git will not guess which was meant — and a
+// real repo hit this with a directory named `head`, matched case-insensitively on macOS. The
+// file here is named HEAD exactly, so the ambiguity reproduces on a case-sensitive
+// filesystem too rather than the test passing vacuously on Linux.
+func TestDiffPathNamedHEAD(t *testing.T) {
+	dir := diffRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "HEAD"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Diff(dir, "", false); err != nil {
+		t.Errorf("the aggregate diff should survive a path named HEAD, got: %v", err)
+	}
+	if _, err := Diff(dir, "", true); err != nil {
+		t.Errorf("the aggregate diff with untracked content should survive it too, got: %v", err)
+	}
+	if _, err := Diff(dir, "tracked.txt", false); err != nil {
+		t.Errorf("a per-file diff should survive it, got: %v", err)
+	}
+
+	// The picker's counts come from a separate invocation, which needs the same separator.
+	stats, err := DiffStats(dir)
+	if err != nil {
+		t.Fatalf("DiffStats should survive a path named HEAD, got: %v", err)
+	}
+	if got := stats["tracked.txt"]; got.Added != 2 || got.Deleted != 1 {
+		t.Errorf("tracked.txt: got %+v, want {Added:2 Deleted:1}", got)
+	}
+}
+
 // TestDiffNoCommits: `git diff HEAD` fails in a repo with no commits, and git's own
-// message ("ambiguous argument 'HEAD'") explains nothing to someone who pressed Diff.
+// message ("bad revision 'HEAD'") explains nothing to someone who pressed Diff.
 func TestDiffNoCommits(t *testing.T) {
 	dir := t.TempDir()
 	git(t, dir, "init", "-q", "-b", "main")
