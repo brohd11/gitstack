@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
@@ -304,14 +305,15 @@ const commitFilesTitle = "Files to Commit"
 // its body. Only a failed read or a clean tree renders as a status line — every state
 // that has files in it lists them.
 func (p *commitPanel) refreshFiles() {
-	changes, err := repo.GitChanges(p.dir)
+	preview, err := repo.CommitPreview(p.dir)
 	if err != nil {
 		p.files.SetTitle(commitFilesTitle)
 		p.files.SetStatus(err.Error())
 		return
 	}
+	changes, stats := commitPreviewRows(preview)
 	p.files.SetTitle(commitPaneTitle(changes))
-	lines := commitPaneLines(changes, p.stage.Index() == stageAllIndex)
+	lines := commitPaneLines(changes, p.stage.Index() == stageAllIndex, stats)
 	if len(lines) == 0 {
 		p.files.SetStatus("nothing to commit — the working tree is clean")
 		return
@@ -319,27 +321,83 @@ func (p *commitPanel) refreshFiles() {
 	p.files.SetLines(lines)
 }
 
+// Keep raw paths in the repository snapshot; escape control characters only at
+// the display boundary so a filename cannot inject rows into the file pane.
+func commitPreviewRows(files []repo.CommitFile) ([]repo.GitChange, map[string]*repo.DiffStat) {
+	changes := make([]repo.GitChange, 0, len(files))
+	stats := make(map[string]*repo.DiffStat, len(files))
+	displayPath := func(path string) string {
+		if strings.ContainsAny(path, "\t\r\n\x1b") {
+			return strconv.Quote(path)
+		}
+		return path
+	}
+	for _, file := range files {
+		f := file.Status
+		code := strings.ReplaceAll(string([]byte{f.Index, f.Worktree}), ".", " ")
+		if f.Untracked {
+			code = "??"
+		}
+		path := displayPath(f.Path)
+		if f.OriginalPath != "" {
+			path = displayPath(f.OriginalPath) + " -> " + path
+		}
+		changes = append(changes, repo.GitChange{Code: code, Path: path})
+		stats[path] = file.Stat
+	}
+	return changes, stats
+}
+
 // commitPaneLines is the pane's body, mirroring the confirm body's sections: the files
 // the commit will contain, then — when "-a" leaves new files behind — the untracked set
-// it won't, so the exclusion is visible before submit, not just at confirm. Uncapped
-// (fileLines max 0): scrolling is the point of the pane. A mode that commits nothing
+// it won't, so the exclusion is visible before submit, not just at confirm. Uncapped:
+// scrolling is the point of the pane. A mode that commits nothing
 // still lists the new files under a line saying so, rather than going blank at the one
 // moment they are the only thing in the tree. Empty result ⇒ nothing changed at all,
 // and the caller shows a status line instead.
-func commitPaneLines(changes []repo.GitChange, stageAll bool) []string {
+func commitPaneLines(changes []repo.GitChange, stageAll bool, stats map[string]*repo.DiffStat) []string {
 	included := commitable(changes, stageAll)
 	untracked := excludedUntracked(changes)
 	if len(included) == 0 && len(untracked) == 0 {
 		return nil
 	}
 
-	lines := fileLines(included, 0)
+	// Size columns across both sections, so toggling staging keeps them aligned.
+	addedWidth, deletedWidth := 2, 2
+	for _, st := range stats {
+		if st != nil && !st.Binary {
+			addedWidth = max(addedWidth, len(fmt.Sprintf("+%d", st.Added)))
+			deletedWidth = max(deletedWidth, len(fmt.Sprintf("-%d", st.Deleted)))
+		}
+	}
+	labels := make(map[string]string, len(changes))
+	width := addedWidth + 2 + deletedWidth
+	for _, c := range changes {
+		label := "counts unavailable"
+		if st := stats[c.Path]; st != nil {
+			if st.Binary {
+				label = "binary"
+			} else {
+				label = fmt.Sprintf("%*s  %*s", addedWidth, fmt.Sprintf("+%d", st.Added), deletedWidth, fmt.Sprintf("-%d", st.Deleted))
+			}
+		}
+		labels[c.Path] = label
+		width = max(width, len(label))
+	}
+	rows := func(files []repo.GitChange) []string {
+		lines := make([]string, 0, len(files))
+		for _, c := range files {
+			lines = append(lines, fmt.Sprintf("  %s  %-*s  %s", c.Code, width, labels[c.Path], c.Path))
+		}
+		return lines
+	}
+	lines := rows(included)
 	if len(included) == 0 {
 		lines = []string{"No existing files to commit"}
 	}
 	if !stageAll && len(untracked) > 0 {
 		lines = append(lines, "", "Not included — new files, which \"-a\" does not stage:")
-		lines = append(lines, fileLines(untracked, 0)...)
+		lines = append(lines, rows(untracked)...)
 	}
 	return lines
 }

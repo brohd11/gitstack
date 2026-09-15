@@ -120,7 +120,7 @@ var untrackedOnlyChanges = []repo.GitChange{
 // TestCommitPaneUntrackedOnly is the regression: "-a" over a tree whose only changes are
 // new files used to render a bare status line, hiding the very files the mode excludes.
 func TestCommitPaneUntrackedOnly(t *testing.T) {
-	lines := strings.Join(commitPaneLines(untrackedOnlyChanges, false), "\n")
+	lines := strings.Join(commitPaneLines(untrackedOnlyChanges, false, nil), "\n")
 
 	if !strings.Contains(lines, "No existing files to commit") {
 		t.Errorf("the pane should say the mode commits nothing:\n%s", lines)
@@ -136,7 +136,7 @@ func TestCommitPaneUntrackedOnly(t *testing.T) {
 }
 
 func TestCommitPaneUntrackedOnlyStageAll(t *testing.T) {
-	lines := strings.Join(commitPaneLines(untrackedOnlyChanges, true), "\n")
+	lines := strings.Join(commitPaneLines(untrackedOnlyChanges, true, nil), "\n")
 
 	if strings.Contains(lines, "No existing files to commit") || strings.Contains(lines, "Not included") {
 		t.Errorf("-A commits the new files, so neither notice belongs:\n%s", lines)
@@ -149,7 +149,7 @@ func TestCommitPaneUntrackedOnlyStageAll(t *testing.T) {
 // TestCommitPaneMixed: the populated shape is unchanged — tracked rows, then the
 // exclusion section under "-a", one list under "-A".
 func TestCommitPaneMixed(t *testing.T) {
-	tracked := strings.Join(commitPaneLines(sampleChanges, false), "\n")
+	tracked := strings.Join(commitPaneLines(sampleChanges, false, nil), "\n")
 	if strings.Contains(tracked, "No existing files to commit") {
 		t.Errorf("there are tracked files here; the empty-state line must not appear:\n%s", tracked)
 	}
@@ -159,7 +159,7 @@ func TestCommitPaneMixed(t *testing.T) {
 		}
 	}
 
-	all := strings.Join(commitPaneLines(sampleChanges, true), "\n")
+	all := strings.Join(commitPaneLines(sampleChanges, true, nil), "\n")
 	if strings.Contains(all, "Not included") {
 		t.Errorf("-A excludes nothing; there should be no exclusion notice:\n%s", all)
 	}
@@ -169,8 +169,8 @@ func TestCommitPaneMixed(t *testing.T) {
 // show a status line instead of an empty box.
 func TestCommitPaneClean(t *testing.T) {
 	for _, stageAll := range []bool{false, true} {
-		if got := commitPaneLines(nil, stageAll); len(got) != 0 {
-			t.Errorf("commitPaneLines(clean, stageAll=%v) = %v, want empty", stageAll, got)
+		if got := commitPaneLines(nil, stageAll, nil); len(got) != 0 {
+			t.Errorf("commitPaneLines(clean, stageAll=%v, nil) = %v, want empty", stageAll, got)
 		}
 	}
 }
@@ -186,5 +186,70 @@ func TestCommitPaneTitle(t *testing.T) {
 	}
 	if got := commitPaneTitle(sampleChanges[:2]); got != commitFilesTitle {
 		t.Errorf("commitPaneTitle(no untracked) = %q, want the bare title", got)
+	}
+}
+
+func TestCommitPaneCounts(t *testing.T) {
+	changes := []repo.GitChange{
+		{Code: " M", Path: "edited.go"},
+		{Code: " D", Path: "deleted.go"},
+		{Code: "R ", Path: "old -> new"},
+		{Code: " M", Path: "image.png"},
+		{Code: " M", Path: "unreadable.go"},
+		{Code: "??", Path: "added.go"},
+	}
+	stats := map[string]*repo.DiffStat{
+		"edited.go":  {Added: 123, Deleted: 4},
+		"deleted.go": {Deleted: 50},
+		"old -> new": {},
+		"image.png":  {Binary: true},
+		"added.go":   {Added: 8},
+	}
+	for _, stageAll := range []bool{false, true} {
+		lines := commitPaneLines(changes, stageAll, stats)
+		body := strings.Join(lines, "\n")
+		for _, label := range []string{"+123   -4", "+0  -50", "+0   -0", "binary", "counts unavailable", "+8   -0"} {
+			if !strings.Contains(body, label) {
+				t.Errorf("stageAll=%v: missing %q:\n%s", stageAll, label, body)
+			}
+		}
+		column := -1
+		for _, c := range changes {
+			for _, line := range lines {
+				if strings.HasSuffix(line, "  "+c.Path) {
+					got := len(line) - len(c.Path)
+					if column >= 0 && got != column {
+						t.Errorf("filename column %d, want %d: %q", got, column, line)
+					}
+					column = got
+				}
+			}
+		}
+		if excluded := strings.Index(body, "Not included"); stageAll {
+			if excluded >= 0 {
+				t.Fatal("stage-all excludes files")
+			}
+		} else if excluded < 0 || strings.Index(body, "added.go") < excluded {
+			t.Fatal("new file must follow the exclusion heading")
+		}
+	}
+}
+
+func TestCommitPreviewRows(t *testing.T) {
+	files := []repo.CommitFile{
+		{Status: repo.FileStatus{Path: "new name", OriginalPath: "old name", Index: 'R', Worktree: '.'}, Stat: &repo.DiffStat{Added: 1}},
+		{Status: repo.FileStatus{Path: "new\nfile", Untracked: true}, Stat: &repo.DiffStat{Added: 2}},
+	}
+	changes, stats := commitPreviewRows(files)
+	if changes[0] != (repo.GitChange{Code: "R ", Path: "old name -> new name"}) {
+		t.Fatal(changes[0])
+	}
+	if changes[1] != (repo.GitChange{Code: "??", Path: `"new\nfile"`}) {
+		t.Fatal(changes[1])
+	}
+	for i, c := range changes {
+		if stats[c.Path] != files[i].Stat {
+			t.Fatalf("lost statistics for %q", c.Path)
+		}
 	}
 }
