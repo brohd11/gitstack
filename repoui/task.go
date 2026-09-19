@@ -2,7 +2,7 @@
 // sibling repo engine: a single-repo streaming task, the per-repo command submenu (status /
 // fetch / pull / commit / push), and the all-repos batch menu. It names no manifest, addon,
 // or app type — a consumer hands it repo.Repo values (and, for the batch menu, scope
-// providers) and reacts to the RefreshMsg it broadcasts. gdaddon composes these behind a
+// providers) and reacts to the refresh messages it broadcasts. gdaddon composes these behind a
 // thin adapter; a plain repo viewer would wire them to a directory scan.
 //
 // The contract mirrors the engine's: pull is fast-forward-only, and any repo that would need
@@ -19,7 +19,7 @@ import (
 	"github.com/brohd11/gitstack/repo"
 )
 
-// RefreshMsg is broadcast (via core.PropagateAll) after a git operation changes a checkout,
+// RefreshMsg is broadcast (via core.PropagateAll) after a batch git operation,
 // so any screen showing git state can settle. repoui's own menus rebuild their rows on it;
 // a consumer that caches git state (like gdaddon's project list) handles it to recompute
 // dirty / ahead / behind. It carries no payload — it's a pure "reload yourself" marker.
@@ -55,7 +55,7 @@ var (
 //
 // o supplies the status vocabulary: o.past is the success status ("pulled"), o.failure the
 // failure one; an empty o.past means the operation only reports (status) and gets no success
-// status line of its own. On success it broadcasts RefreshMsg so any list's markers settle.
+// status line of its own. On success it broadcasts RepoRefreshMsg so affected markers settle.
 func Task(label string, o Op, dir string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
 	run := func(ctx context.Context, sh *core.Shared, report func(string, ...any), done chan<- core.TaskEvent) {
 		done <- core.TaskEvent{Done: true, Err: op(ctx, dir, report)}
@@ -67,11 +67,11 @@ func Task(label string, o Op, dir string, op func(context.Context, string, repo.
 			return core.SetStatusAndLog(o.failure + " — resolve it in a terminal (t)")
 		}
 		if o.past == "" {
-			return core.PropagateAll(RefreshMsg{})
+			return core.PropagateAll(RepoRefreshMsg{Dir: dir})
 		}
 		return core.Seq(
 			core.SetStatus(o.past),
-			core.PropagateAll(RefreshMsg{}),
+			core.PropagateAll(RepoRefreshMsg{Dir: dir}),
 		)
 	}
 	onDismiss := func(*core.Shared) core.Action { return core.PopTo() } // back to the hub

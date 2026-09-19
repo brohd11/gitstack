@@ -76,7 +76,9 @@ func scopeScreen(sh *core.Shared, scopes []Scope, i int, root RootOption, includ
 		// Rebuild after any git op reports back, so popping out of a finished pull doesn't land
 		// on rows that still say "2 behind".
 		Refresh: func(sh *core.Shared, payload any) ([]list.Item, bool) {
-			if _, ok := payload.(RefreshMsg); !ok {
+			switch payload.(type) {
+			case RefreshMsg, RepoRefreshMsg:
+			default:
 				return nil, false
 			}
 			return menuItems(scopes, i, scopeTargets(scopes[i], root, includeRoot, sh), root, includeRoot, rootOK(sh)), true

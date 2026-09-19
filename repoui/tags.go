@@ -147,7 +147,7 @@ func TagsScreen(sh *core.Shared, r repo.Repo) *components.ModularScreen {
 			PopStop: true,
 			Init:    func(*core.Shared) tea.Cmd { return remoteTagsCmd(r.Dir) },
 			Refresh: func(_ *core.Shared, payload any) bool {
-				if _, ok := payload.(RefreshMsg); !ok {
+				if !refreshesRepo(payload, r.Dir) {
 					return false
 				}
 				setLocal()

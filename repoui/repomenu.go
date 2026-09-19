@@ -34,7 +34,7 @@ var stageAllIndex = slices.Index(stageOptions, stageAllOption)
 // RepoMenu builds the Git command hub for one checkout. Each row's Desc reads the repo's
 // current local git state (recomputed via the engine on build), so the menu itself answers
 // "what shape is this repo in" before you pick anything. PopStop makes it the hub the
-// sub-flows (task screens, the commit form) return to. It rebuilds on RefreshMsg so popping
+// sub-flows (task screens, the commit form) return to. It rebuilds on matching refreshes so popping
 // out of a finished pull doesn't land on rows that still say "3 behind". The breadcrumb
 // segment defaults to "Git"; hosts that reach the menu directly (a repo row, "ctrl+v") pass
 // a crumb — the repo name — so the trail still says where you are.
@@ -49,7 +49,7 @@ func RepoMenu(sh *core.Shared, r repo.Repo, crumb ...string) *components.PickerS
 		Dir:     r.Dir, // "t" opens a terminal at this repo from the Git menu (DirLocator)
 		PopStop: true,
 		Refresh: func(sh *core.Shared, payload any) ([]list.Item, bool) {
-			if _, ok := payload.(RefreshMsg); !ok {
+			if !refreshesRepo(payload, r.Dir) {
 				return nil, false
 			}
 			return repoItems(r), true

@@ -286,7 +286,7 @@ func DiffMenu(sh *core.Shared, r repo.Repo) *components.PickerScreen {
 		Crumb: "Diff",
 		Dir:   r.Dir, // "t" opens a terminal at this repo from the Diff list (DirLocator)
 		Refresh: func(sh *core.Shared, payload any) ([]list.Item, bool) {
-			if _, ok := payload.(RefreshMsg); !ok {
+			if !refreshesRepo(payload, r.Dir) {
 				return nil, false
 			}
 			return diffItems(r), true
