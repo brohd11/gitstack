@@ -6,25 +6,14 @@ import (
 	"strings"
 )
 
-// This file reads commit history for the UI to render. Like diff.go it captures whole
-// stdout through gitCapture rather than going through GitStream (whose line splitting drops
-// empty lines — a blank line inside a commit message is content) or GitOutput (which
-// swallows every error to "", rendering a log that failed as a repo with no history).
-//
-// Nothing here passes `-c color.ui=always`, for the same reason diff.go states: the renderer
-// applies its own theme-aware color, and git's ANSI would only have to be stripped back out
-// before the records could be split.
+// Commit history for the UI, captured whole through gitCapture (blank message lines are
+// content, and failures must stay errors). No color: the renderer colors it.
 
-// LogLimit is how many commits a log capture reads by default. A repo's whole history can
-// run to five figures, and every one of those commits would be parsed, held, and re-rendered
-// into one string on each mode toggle — for a view whose job is answering "what happened
-// recently". Callers that hit the cap are told so (see LogScreen), rather than being quietly
-// shown a partial history.
+// LogLimit caps a log capture; long histories would be parsed and re-rendered on every
+// toggle for a view about recent work. LogScreen says when the cap was hit.
 const LogLimit = 500
 
-// The field and record separators. ASCII unit/record separator are chosen precisely because
-// git will never emit them from the fields being read: a commit message containing 0x1f
-// would have to have been written with one in it.
+// Field and record separators (ASCII US/RS), which never appear in git's fields.
 const (
 	fieldSep  = "\x1f"
 	recordSep = "\x1e"
@@ -40,9 +29,7 @@ const logFormat = "%H" + fieldSep + "%h" + fieldSep + "%P" + fieldSep + "%D" +
 // is malformed and skipped rather than read at the wrong offsets.
 const logFields = 9
 
-// RefKind classifies a decoration, which is what decides how it's colored — git's own
-// palette gives each kind a different color, and that coloring is the whole reason to
-// classify them here rather than pass the decoration text through as one string.
+// RefKind classifies a decoration so each kind gets git's color for it.
 type RefKind int
 
 const (
@@ -76,11 +63,8 @@ type Commit struct {
 // Merge reports whether the commit has more than one parent.
 func (c Commit) Merge() bool { return len(c.Parents) > 1 }
 
-// ErrNoCommits is returned by Log for a repo that has no commits. It's a sentinel rather
-// than a plain error because it isn't a failure: git's own answer ("fatal: your current
-// branch 'main' does not have any commits yet") explains nothing to someone who just pressed
-// Log, and a caller that reports it as a failed read would be describing an empty history as
-// a broken one. Callers test for it with errors.Is and say so plainly.
+// ErrNoCommits reports a repo with no commits: not a failure, so callers check it with
+// errors.Is and say so plainly instead of git's message.
 var ErrNoCommits = errors.New("this repo has no commits yet")
 
 // Log reads dir's most recent commits, newest first, up to limit (LogLimit when limit is not
@@ -104,14 +88,9 @@ func Log(dir string, limit int) ([]Commit, error) {
 	return parseLog(out, remoteSet(dir)), nil
 }
 
-// remoteSet is the repo's configured remote names, for telling `origin/main` (a remote
-// branch, colored red) from `feature/main` (a local one, colored green). Reading them costs
-// one extra git call per capture and is the only way to be right: a "/" in the name proves
-// nothing, since branch names may contain them.
-//
-// A repo with no remotes — or a failed read — yields an empty set, which classifies every
-// slash-bearing ref as a local branch. That's the correct answer for the no-remote case and
-// the conservative one otherwise.
+// remoteSet is the repo's remote names, to tell `origin/main` (remote) from `feature/main`
+// (local); a "/" alone proves nothing. No remotes, or a failed read, gives an empty set,
+// classifying slash refs as local.
 func remoteSet(dir string) map[string]bool {
 	out := GitOutput(dir, "remote")
 	if out == "" {

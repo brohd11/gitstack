@@ -7,10 +7,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// RootLineValue renders a header "Root:" value: path left-truncated to budget, with the root
-// repo's StatusMarker appended when root is non-nil. The marker's rendered width is taken out
-// of the path's budget so the whole value still fits budget columns. root nil ⇒ just the
-// truncated path. Both repoview and gdaddon draw their base/project-root line this way.
+// RootLineValue renders a header "Root:" value: path left-truncated to budget, plus the
+// root repo's StatusMarker (its width taken from the budget) when root is non-nil.
 func RootLineValue(path string, root *repo.Repo, budget int) string {
 	if root == nil {
 		return core.TruncLeft(path, budget)

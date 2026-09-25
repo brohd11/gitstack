@@ -19,11 +19,9 @@ func FetchLine(r FetchResult) string {
 	}
 }
 
-// FetchSummary is the status line for a finished fetch-all: how many repos were fetched and
-// what it turned up. noun is the plural label for what was fetched (e.g. "repo(s)" or
-// "git checkout(s)"), so each tool keeps its own wording. failed reports whether anything
-// errored — the per-repo reason is in the log (FetchLine), so a caller uses it to decide
-// whether to force the log pane open.
+// FetchSummary is the status line for a finished fetch-all. noun is the plural label (e.g.
+// "repo(s)"). failed reports any error, so a caller can open the log pane (per-repo
+// reasons are there).
 func FetchSummary(results []FetchResult, noun string) (line string, failed bool) {
 	behind, failedN := 0, 0
 	for _, r := range results {

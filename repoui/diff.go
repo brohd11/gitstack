@@ -12,41 +12,23 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
-// The Diff view: what the Status row can't answer. `git status` names the files that
-// changed; this shows what changed inside them, which is the question you actually have
-// on the way to a commit.
-//
-// It reads the working tree against HEAD — staged and unstaged together — so it shows the
-// same set of changes the commit flow would include, rather than a subset that depends on
-// what has been `add`ed. Like the rest of this menu it is read-only: there is no staging,
-// no hunk selection, no editing. Those are decisions, and decisions belong in a terminal.
+// The Diff view: what changed inside the files git status names, working tree against
+// HEAD (staged and unstaged), matching what a commit would include. Read-only.
 
-// keys are the Diff view's own bindings, the ones that aren't part of bubblestack's
-// framework keymap (core.Keys) — the same arrangement repoview uses for its screen-level
-// keys. Matched with core.MatchKey like every other dispatch site, never as a raw keycode.
-//
-// "s" is free in core.Keys, and wrap is deliberately NOT here: it's core.Keys.Wrap ("w"),
-// because a diff wrapping its long lines is the same gesture as the output pane wrapping
-// its long lines, and it should be the same key. DiffScreen implements core.Wrapper to
-// receive it.
+// keys are the Diff view's own bindings, outside core.Keys. Wrap is core.Keys.Wrap, the
+// same gesture as wrapping the output pane (DiffScreen is a core.Wrapper).
 var keys = struct {
 	Layout key.Binding
 }{
 	Layout: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "layout")),
 }
 
-// layout is how the diff is arranged. Auto is the zero value, and therefore the default,
-// without NewDiffScreen having to say so.
-//
-// Auto and layoutSplit render identically whenever the width allows; they differ in what
-// happens when it doesn't. Auto quietly uses the layout that fits, because it never claimed
-// side by side in the first place — it claimed "the right one". An explicit layoutSplit is
-// a request, so failing to honor it has to be explained, or it reads as a broken key.
+// layout is the diff arrangement; auto is the zero value. Auto and layoutSplit agree when
+// the width allows; when it does not, auto silently goes unified, while an explicit split
+// explains why it cannot be honored.
 type layout int
 
 const (
@@ -58,28 +40,13 @@ const (
 // layoutCount is the number of modes the s key cycles through.
 const layoutCount = 3
 
-// DiffScreen is a scrollable diff for one file, or for a whole repo's worth of them. The
-// diff is captured once when the screen opens and parsed once; the layout toggles re-run
-// only the render, not git.
-//
-// It deliberately does not reuse components.DocScreen, which owns exactly this viewport
-// plumbing. DocScreen renders a caller's Render(width) closure and re-runs it on width
-// changes only — but this screen's content also depends on the layout mode and the wrap
-// flag, which it must re-render on, and the Wrap key only reaches a screen that implements
-// core.Wrapper itself (the router type-asserts the top screen). Threading both of those
-// back out through DocScreen's closure would mean two new escape hatches on a shared
-// component to save one viewport field here.
+// DiffScreen is a scrollable diff for one file or a whole repo, captured and parsed once
+// when the screen opens; the layout toggle re-runs only the render.
 type DiffScreen struct {
-	title string
-	dir   string // the repo the diff is from; enables the global Terminal key (DirLocator)
-	lines []diffLine
-	empty string // set when there is nothing to show; rendered in place of the diff
-
+	pager
+	lines  []diffLine
+	empty  string // set when there is nothing to show; rendered in place of the diff
 	layout layout // s — cycles auto → unified → side by side
-	wrap   bool   // w — fold long lines rather than truncate them (core.Wrapper)
-
-	vp    viewport.Model
-	width int // last laid-out terminal width; -1 until the first SetSize
 }
 
 var (
@@ -88,20 +55,10 @@ var (
 	_ core.DirLocator = (*DiffScreen)(nil)
 )
 
-// LocateDir reports the repo the diff is from, so the global Terminal key opens a terminal
-// there while viewing the diff. Empty dir ⇒ no locator (the key falls through).
-func (s *DiffScreen) LocateDir() (string, bool) { return s.dir, s.dir != "" }
-
-// NewDiffScreen captures the diff and builds the screen. A capture failure isn't fatal —
-// the screen opens and says what went wrong, which is more use than a status line flashing
-// over the menu you just left.
+// NewDiffScreen captures the diff and builds the screen; a capture failure is shown on the
+// screen rather than flashed on the status line.
 func NewDiffScreen(title, dir, path string, untracked bool) *DiffScreen {
-	s := &DiffScreen{
-		title: title,
-		dir:   dir,
-		vp:    viewport.New(),
-		width: -1,
-	}
+	s := (&DiffScreen{pager: newPager(title, dir)}).wire()
 
 	raw, err := repo.Diff(dir, path, untracked)
 	switch {
@@ -117,11 +74,8 @@ func NewDiffScreen(title, dir, path string, untracked bool) *DiffScreen {
 	return s
 }
 
-func (s *DiffScreen) Init(*core.Shared) tea.Cmd { return nil }
-
-// CrumbLabel names what is being diffed, not the feature: the picker above already
-// contributes "Diff", so returning that here too would read "Git › Diff › Diff". The short
-// form drops the directories, which is what a long trail needs to give up first.
+// CrumbLabel names what is diffed ("Diff" already comes from the picker); the short form
+// drops directories.
 func (s *DiffScreen) CrumbLabel(short bool) string {
 	if short {
 		return filepath.Base(s.title)
@@ -129,57 +83,22 @@ func (s *DiffScreen) CrumbLabel(short bool) string {
 	return s.title
 }
 
-// ToggleWrap folds or truncates long lines (core.Wrapper — the router's w key).
-func (s *DiffScreen) ToggleWrap() {
-	s.wrap = !s.wrap
-	s.rerender()
+// wire points the pager at this screen's render and layout label.
+func (s *DiffScreen) wire() *DiffScreen {
+	s.body, s.modeLabel = s.render, s.layoutName
+	return s
 }
 
-func (s *DiffScreen) Wrapped() bool { return s.wrap }
-
-// splittable reports whether the side-by-side layout fits. Below minSplitWidth each column
-// would be too narrow to read code in, so the screen renders unified instead — rather than
-// honoring a layout into something unusable.
+// splittable reports whether side by side fits; narrower, columns are too narrow for code.
 func (s *DiffScreen) splittable() bool { return s.width >= minSplitWidth }
 
-// effectiveSplit reports whether side by side is what actually gets rendered. Auto and an
-// explicit layoutSplit agree here — both want side by side and both defer to the width;
-// only layoutUnified rules it out outright.
+// effectiveSplit reports whether side by side is rendered: auto and split both want it
+// when it fits.
 func (s *DiffScreen) effectiveSplit() bool {
 	return s.layout != layoutUnified && s.splittable()
 }
 
-func (s *DiffScreen) SetSize(_ *core.Shared, width, bodyHeight int) {
-	h := bodyHeight - lipgloss.Height(core.RenderTitleBar(s.titleBar()))
-	if h < 1 {
-		h = 1
-	}
-	s.vp.SetWidth(width)
-	s.vp.SetHeight(h)
-	if width == s.width {
-		return // height-only change (the output pane opening): the content is unaffected
-	}
-	s.width = width
-	s.rerender()
-}
-
-// rerender rebuilds the body at the current width, keeping the scroll position: a layout
-// or wrap toggle is a question about the lines you are already looking at, so jumping back
-// to the top of the file would lose your place every time you pressed s.
-func (s *DiffScreen) rerender() {
-	if s.width < 0 {
-		return // not laid out yet; SetSize will render
-	}
-	// SetYOffset re-clamps against the new content's length, which matters because the
-	// layouts differ in height: side by side puts an edit's two halves on one row, so
-	// switching to it from a position near the end of a long unified diff would otherwise
-	// leave the offset past the last line.
-	y := s.vp.YOffset()
-	s.vp.SetContent(s.body())
-	s.vp.SetYOffset(y)
-}
-
-func (s *DiffScreen) body() string {
+func (s *DiffScreen) render() string {
 	if s.empty != "" {
 		return metaStyle().Render(s.empty)
 	}
@@ -189,25 +108,9 @@ func (s *DiffScreen) body() string {
 	return renderUnified(s.lines, s.width, s.wrap)
 }
 
-// titleBar names the file, then whatever is worth saying about how it's being shown.
-func (s *DiffScreen) titleBar() string {
-	parts := []string{s.title}
-	if mode := s.modeLabel(); mode != "" {
-		parts = append(parts, mode)
-	}
-	if s.wrap {
-		parts = append(parts, "wrap")
-	}
-	return strings.Join(parts, " · ")
-}
-
-// modeLabel is what the title bar says about the layout — and auto deliberately says
-// nothing. Auto renders the same thing as one of the two explicit modes, so if it named
-// that layout it would be indistinguishable from having chosen it, and pressing s would
-// look like it did nothing. Naming only the explicit modes means leaving auto always adds
-// a label and returning to it always drops one, which is what makes the cycle legible —
-// and it keeps the common case (the default) reading as just the filename.
-func (s *DiffScreen) modeLabel() string {
+// layoutName is the title bar's layout label. Auto says nothing: it renders like one of
+// the explicit modes, and naming that would make the s cycle look like it did nothing.
+func (s *DiffScreen) layoutName() string {
 	switch {
 	case s.layout == layoutAuto:
 		return ""
@@ -240,36 +143,16 @@ func (s *DiffScreen) Update(sh *core.Shared, msg tea.Msg) (core.Screen, core.Act
 			return s, core.Action{}
 		}
 	}
-	var cmd tea.Cmd
-	s.vp, cmd = s.vp.Update(msg)
-	return s, core.Async(cmd)
+	return s, s.scroll(msg)
 }
 
-func (s *DiffScreen) View(*core.Shared) string {
-	return core.WithTitle(s.titleBar(), s.vp.View())
-}
-
-func (s *DiffScreen) HelpView(sh *core.Shared) string {
-	binds := []key.Binding{
-		core.Hint("scroll", core.Keys.Up, core.Keys.Down),
-		core.Hint("layout", keys.Layout),
-		core.Hint("wrap", core.Keys.Wrap),
-	}
-	// A diff carries the repo it's from (DirLocator), so the terminal/open-dir keys fire here,
-	// but they stay off the bar — it is kept sparse (see core.ShortHelp).
-	binds = append(binds, core.Hint("back", core.Keys.Back))
-	return sh.BindingHelp(binds)
-}
+func (s *DiffScreen) HelpView(sh *core.Shared) string { return s.help(sh, "layout", keys.Layout) }
 
 // ---------- the file picker ----------
 
-// DiffAction is what a row's "d" does: push the per-repo Git menu, then the diff picker on
-// top of it. The Git menu underneath is the hub with Commit, so esc from a diff lands on the
-// action the diff was read to inform — reading a diff is the step before committing. The
-// trail reads "… › Git › Diff", and since esc is a one-level pop, the alternative (pushing
-// the picker alone) would make you esc to the list and re-enter via the Git key to reach the
-// action the diff just argued for. crumb is forwarded to the seeded Git menu (see RepoMenu),
-// so the trail reads "… › <repo> › Diff" when the host passes the repo name.
+// DiffAction is a row's "d": push the repo's Git menu, then the diff picker, so esc from
+// a diff lands on the menu with Commit (reading a diff precedes committing). crumb is
+// passed to the Git menu.
 func DiffAction(sh *core.Shared, r repo.Repo, crumb ...string) core.Action {
 	return core.Seq(
 		core.Push(RepoMenu(sh, r, crumb...)),
@@ -277,9 +160,8 @@ func DiffAction(sh *core.Shared, r repo.Repo, crumb ...string) core.Action {
 	)
 }
 
-// DiffMenu lists what changed, so a diff can be read one file at a time instead of as one
-// long scroll. The first row is the whole repo's diff — the common case when the change is
-// small, and the one that shows how the files relate.
+// DiffMenu lists the changed files to diff one at a time; the first row is the whole
+// repo's diff.
 func DiffMenu(sh *core.Shared, r repo.Repo) *components.PickerScreen {
 	return components.NewPicker(diffItems(r), components.PickerOpts{
 		Title: r.Name,
@@ -329,19 +211,18 @@ func diffItems(r repo.Repo) []list.Item {
 	return components.EnsurePlaceholder(items, "working tree is clean", "nothing to diff")
 }
 
-// allFilesDesc totals the counts across every file, so the top row reports the size of the
-// change before you open it. A failed numstat read (statsFailed) would total to a misleading
-// "no line changes", so it says nothing about counts instead.
+// allFilesDesc totals the counts for the top row; after a failed numstat read it omits
+// counts rather than claim none.
 func allFilesDesc(changes []repo.GitChange, stats map[string]repo.DiffStat, statsFailed bool) string {
 	if statsFailed {
-		return fmt.Sprintf("every change in one page — %s", plural(len(changes), "file"))
+		return fmt.Sprintf("every change in one page — %s", strutil.Count(len(changes), "file"))
 	}
 	var added, deleted int
 	for _, st := range stats {
 		added += st.Added
 		deleted += st.Deleted
 	}
-	return fmt.Sprintf("every change in one page — %s, %s", plural(len(changes), "file"), counts(added, deleted))
+	return fmt.Sprintf("every change in one page — %s, %s", strutil.Count(len(changes), "file"), counts(added, deleted))
 }
 
 func fileDesc(c repo.GitChange, st repo.DiffStat, statsFailed bool) string {
@@ -366,11 +247,4 @@ func counts(added, deleted int) string {
 		return "no line changes"
 	}
 	return fmt.Sprintf("+%d  -%d", added, deleted)
-}
-
-// plural renders "1 file" / "3 files" for the diff header's counts. It formats the whole
-// count, which is why it stays here: the shared strutil.Plural only picks the noun form,
-// and does the "s" branch inside.
-func plural(n int, noun string) string {
-	return fmt.Sprintf("%d %s", n, strutil.Plural(n, noun, noun+"s"))
 }

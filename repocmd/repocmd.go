@@ -1,13 +1,6 @@
-// Package repocmd is the `repos` subcommand: walk a directory tree, find every nested
-// git repo, and run a shell command inside each one.
-//
-// It lives here, beside the engine it drives, because repoview and gdaddon had each
-// carried a copy -- ~85% identical, and drifted. repoview's had picked up wrapped errors
-// and cobra's own output streams (making it testable); gdaddon's still printed straight
-// to os.Stdout and had never received either fix. This is repoview's, parameterised.
-//
-// What actually differs per app is passed in: the name shown in the help examples, the
-// default depth, and how (or whether) an environment variable may override it.
+// Package repocmd is the `repos` subcommand: find every git repo under a directory and
+// run a shell command in each. Apps pass their help name, default depth and depth
+// resolver.
 package repocmd
 
 import (
@@ -32,15 +25,11 @@ type Options struct {
 	// DefaultDepth is the --depth default. repoview scans 1 level, gdaddon 5.
 	DefaultDepth int
 
-	// DepthDefText overrides the default shown in --help. An app whose ResolveDepth
-	// consults an environment variable wants to say so here, because the number pflag
-	// would print is only the last rung of the ladder. Empty means let pflag print the
-	// number.
+	// DepthDefText overrides the default shown in --help (an app whose ResolveDepth reads an
+	// environment variable says so here).
 	DepthDefText string
 
-	// ResolveDepth turns the flag into the depth actually used, letting an app layer an
-	// environment variable underneath it (see goutil/envopt). nil means take the flag
-	// as given.
+	// ResolveDepth maps the flag to the depth used (see goutil/envopt); nil takes the flag.
 	ResolveDepth func(flagDepth int, flagChanged bool) (int, error)
 }
 
@@ -139,9 +128,7 @@ func run(cmd *cobra.Command, args []string, cfg runConfig) error {
 	if err != nil {
 		return err
 	}
-	// FindGitRepos excludes the base itself; --include-root opts it back in as the "." entry, which
-	// flows through the dirty filter and both output modes unchanged (base-relative "." resolves to
-	// base). Only when base is actually a checkout.
+	// --include-root adds base itself as "." when it is a checkout.
 	if cfg.includeRoot {
 		if _, ok := repo.DescribeRoot(base); ok {
 			repos = append([]string{"."}, repos...)

@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,45 +10,20 @@ import (
 	"strings"
 )
 
-// This file captures diffs for the UI to render. It sits apart from the other two
-// git primitives because neither can carry a diff intact:
-//
-//   - GitStream (ops.go) relays through a Reporter, and its line splitting (in
-//     goutil/stream) drops empty lines and trims trailing whitespace. In a diff both are
-//     content: a blank context line is a line, and the leading marker column is the whole
-//     format.
-//   - GitOutput (repo.go) swallows every error to "", which would render a diff that
-//     failed as a diff that was empty — a clean tree. The difference matters here.
-//
-// So these capture whole stdout, byte for byte, and keep the error.
-//
-// Nothing here passes `-c color.ui=always`. The renderer parses the plain unified format
-// and applies its own theme-aware color; git's ANSI would only have to be stripped back
-// out before it could be parsed.
+// Diff capture for the UI. It keeps whole stdout, byte for byte, with the error: GitStream
+// drops empty lines and trailing whitespace (content in a diff), and GitOutput turns a
+// failure into "", which would read as a clean tree. No color is requested; the renderer
+// colors the plain unified format itself.
 
-// diffAgainst is the revision working-tree diffs are taken against. HEAD (rather than a
-// bare `git diff`) includes staged changes as well as unstaged ones, so the view answers
-// the same question the commit flow asks — what would `commit -a` contain — rather than
-// hiding anything already added to the index.
-//
-// Every diff that names it must follow it with `--`. Without the separator git has to guess
-// whether HEAD is a revision or a path, and it refuses to guess when the working tree holds
-// a matching one: a file or directory literally named HEAD, or — on a case-insensitive
-// filesystem, which is macOS's default — one named `head`. A repo with a `head/` directory
-// in it then gets "fatal: ambiguous argument 'HEAD': both revision and filename" in place of
-// its diff, which is why this is not tidy-up that can be dropped.
+// diffAgainst is the revision working-tree diffs compare to. HEAD includes staged changes,
+// matching what `commit -a` would contain. Always follow it with `--`: git refuses to guess
+// when a file or directory named HEAD (or `head` on case-insensitive macOS) exists.
 const diffAgainst = "HEAD"
 
-// Diff returns the unified diff of dir's working tree for one path, or for every changed
-// file when path is "".
-//
-// untracked says whether untracked content is in scope, and it has to be asked either way
-// because `diff HEAD` cannot answer for it: a file that is in neither HEAD nor the index is
-// not something git has anything to compare, so it reports nothing at all rather than
-// reporting a new file. With untracked=true a path diffs via --no-index against /dev/null —
-// one all-additions hunk — and an empty path diffs the whole tree that way (see diffAll).
-//
-// The returned string is git's raw output, uninterpreted.
+// Diff returns the unified diff of one path in dir's working tree, or of every changed
+// file for "". untracked says whether untracked content is in scope (`diff HEAD` reports
+// nothing for it): a path diffs against /dev/null, and "" covers the whole tree (see
+// diffAll). The output is git's, raw.
 func Diff(dir, path string, untracked bool) (string, error) {
 	if dir == "" {
 		return "", errors.New("no repo directory")
@@ -65,9 +41,7 @@ func Diff(dir, path string, untracked bool) (string, error) {
 	}
 	out, err := gitCapture(dir, args...)
 	if err != nil {
-		// A repo with no commits has no HEAD to diff against, and git's own message
-		// ("fatal: bad revision 'HEAD'") explains nothing to someone who just pressed
-		// Diff. Every file is new in that repo, so say that instead.
+		// With no commits there is no HEAD; say every file is new instead of git's error.
 		if !hasHEAD(dir) {
 			return "", errors.New("this repo has no commits yet — every file is new")
 		}
@@ -76,21 +50,12 @@ func Diff(dir, path string, untracked bool) (string, error) {
 	return out, nil
 }
 
-// diffAll is the whole working tree with nothing left out: `diff HEAD` for the files git
-// tracks, then one --no-index diff appended per untracked file. Two git invocations cannot
-// be avoided here — no single command reports both, and the alternative (`add -N` to
-// intend-to-add the new files first) writes to the index, which a view that only reads must
-// not do.
-//
-// Without the second half this is the aggregate view's old behavior, and it was a lie: the
-// picker row counts untracked files in its "N files" and promised "every change in one
-// page", while `diff HEAD` silently dropped every one of them.
+// diffAll is the whole working tree: `diff HEAD` for tracked files plus a --no-index diff
+// per untracked file. Two invocations, since `add -N` would write to the index.
 func diffAll(dir string) (string, error) {
 	var parts []string
 
-	// A repo with no commits has no HEAD to diff against — but every file in it is
-	// untracked, so the loop below can still render the whole tree. Only the tracked half
-	// is missing, and it is missing because there is none.
+	// With no commits every file is untracked, so the loop below still covers the tree.
 	if hasHEAD(dir) {
 		out, err := gitCapture(dir, "-c", "core.quotepath=false", "diff", diffAgainst, "--")
 		if err != nil {
@@ -123,10 +88,8 @@ func diffAll(dir string) (string, error) {
 	return strings.Join(parts, ""), nil
 }
 
-// diffNoIndex renders an untracked file as a diff against the null device (os.DevNull, so
-// this holds on Windows too — see terminal.go for the other place the OS shows through).
-// --no-index exits 1 when the two sides differ, which for a file with any content at all
-// is always — so exit 1 is the success path here and only a worse status is an error.
+// diffNoIndex diffs an untracked file against os.DevNull. --no-index exits 1 when the
+// sides differ, so 1 is success here.
 func diffNoIndex(dir, path string) (string, error) {
 	out, err := gitCapture(dir, "-c", "core.quotepath=false", "diff", "--no-index", "--", os.DevNull, path)
 	if err != nil && exitCode(err) != 1 {
@@ -143,9 +106,8 @@ type DiffStat struct {
 	Binary  bool
 }
 
-// DiffStats maps each changed file's repo-relative path to its counts, via `diff
-// --numstat HEAD`. Untracked files are absent — they aren't in the diff at all — so a
-// caller reading a missing entry gets the zero value and should say "new file" instead.
+// DiffStats maps each changed path to its counts (`diff --numstat HEAD`). Untracked files
+// are absent; the zero value should read as "new file".
 func DiffStats(dir string) (map[string]DiffStat, error) {
 	if dir == "" {
 		return nil, nil
@@ -160,9 +122,8 @@ func DiffStats(dir string) (map[string]DiffStat, error) {
 
 	stats := make(map[string]DiffStat)
 	for _, line := range strings.Split(out, "\n") {
-		// "added\tdeleted\tpath", with "-\t-\tpath" for a binary file. A rename arrives
-		// as "a\td\told => new" (or a brace form); the path is kept verbatim, matching
-		// GitChanges' reading of a rename.
+		// "added\tdeleted\tpath" ("-\t-\t" for binary); a rename's path is kept verbatim, as
+		// GitChanges does.
 		parts := strings.SplitN(line, "\t", 3)
 		if len(parts) != 3 {
 			continue
@@ -181,18 +142,11 @@ func DiffStats(dir string) (map[string]DiffStat, error) {
 	return stats, nil
 }
 
-// gitCapture runs a read-only `git -C dir <args...>` and returns its stdout whole — no
-// trimming, since a diff's leading spaces and blank lines are content. On failure it folds
-// git's stderr into the error, which is the part worth reading.
-//
-// stdout is returned even when err is non-nil, and that is not incidental: a non-zero exit
-// does not always mean there is no output. `diff --no-index` exits 1 precisely when it
-// found differences — it has produced the whole diff and is reporting what it found — so a
-// caller that can read the status decides whether the output counts. Discarding it here
-// would silently render every untracked file as empty.
+// gitCapture runs a read-only git command and returns stdout untrimmed (whitespace is
+// content), folding stderr into any error. stdout is returned even on error: `diff
+// --no-index` exits 1 when it found differences, and the caller decides.
 func gitCapture(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = GitEnv()
+	cmd := gitCmd(context.Background(), dir, args...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 
@@ -209,7 +163,7 @@ func gitCapture(dir string, args ...string) (string, error) {
 // hasHEAD reports whether dir has any commits — the thing `git diff HEAD` needs and a
 // freshly-initialized repo lacks.
 func hasHEAD(dir string) bool {
-	return exec.Command("git", "-C", dir, "rev-parse", "--verify", "HEAD").Run() == nil
+	return gitCmd(context.Background(), dir, "rev-parse", "--verify", "HEAD").Run() == nil
 }
 
 // exitCode returns the process's exit status, or -1 when err isn't an exit failure.

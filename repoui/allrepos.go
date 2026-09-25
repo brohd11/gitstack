@@ -12,32 +12,24 @@ import (
 	"charm.land/bubbles/v2/list"
 )
 
-// Scope is one selectable set of repos the all-repos operations act on, named by Label and
-// produced fresh by Repos (read on every menu build, confirm, and run — the tree moves under
-// us). A consumer supplies the scopes: gdaddon passes clones / submodules / all; a plain
-// viewer might pass a single "all repos" scope. When more than one is given the menu shows a
-// row that cycles between them.
+// Scope is a named set of repos the batch operations act on. Repos is re-read on every
+// build, confirm and run, since the tree changes. With several scopes the menu gets a row
+// cycling between them.
 type Scope struct {
 	Label string
 	Repos func(*core.Shared) []repo.Repo
-	// ExcludeRoot suppresses the include-root toggle for this scope: even while include-root is
-	// on, the root is neither offered as a toggle row nor added to the targets. For a scope the
-	// root doesn't belong to — e.g. gdaddon's submodules-only scope, where the root is a
-	// top-level clone, not a submodule. Zero value (false) keeps the root available, as before.
+	// ExcludeRoot keeps the include-root toggle and target out of this scope (e.g. a
+	// submodules-only scope where the root is not a submodule).
 	ExcludeRoot bool
 }
 
-// RootOption optionally augments the batch menu with an "include root" toggle row. When Repo
-// returns ok, while the toggle is on that repo is appended to the targets of every operation.
-// Zero value (nil Repo) ⇒ no row, no target — the menu is scopes-only, exactly as before.
+// RootOption adds an "include root" toggle; while on, the repo Repo returns joins every
+// operation's targets. A nil Repo means no toggle.
 type RootOption struct {
 	Repo func(*core.Shared) (repo.Repo, bool)
 }
 
-// RootOptionFor builds a RootOption from a pointer accessor: it yields the pointed-to repo
-// when non-nil, nothing otherwise (no toggle row). Consumers that keep a *repo.Repo on their
-// context — the scanned base / project root when it's a checkout — pass a one-line getter
-// rather than re-spelling the nil-check-and-deref closure.
+// RootOptionFor builds a RootOption from a pointer accessor: no toggle while it is nil.
 func RootOptionFor(get func(*core.Shared) *repo.Repo) RootOption {
 	return RootOption{Repo: func(sh *core.Shared) (repo.Repo, bool) {
 		if r := get(sh); r != nil {
@@ -47,16 +39,14 @@ func RootOptionFor(get func(*core.Shared) *repo.Repo) RootOption {
 	}}
 }
 
-// AllReposMenu is the batch git menu: fetch, pull, or push every repo in the active scope,
-// cycling through scopes when more than one is given. PopStop makes it the hub the
-// confirm/task sub-flows return to.
+// AllReposMenu is the batch git menu: fetch, pull or push every repo in the active scope.
+// It is the PopStop hub its sub-flows return to.
 func AllReposMenu(sh *core.Shared, scopes []Scope, root RootOption) *components.PickerScreen {
 	return scopeScreen(sh, scopes, 0, root, false)
 }
 
-// scopeScreen builds the menu at a given scope index. Cycling replaces the screen with a
-// fresh one at the next index, so the rows (and their live counts) rebuild from the new
-// filter.
+// scopeScreen builds the menu at scope index i; cycling replaces it with a fresh screen,
+// so counts are recomputed.
 func scopeScreen(sh *core.Shared, scopes []Scope, i int, root RootOption, includeRoot bool) *components.PickerScreen {
 	if len(scopes) == 0 {
 		scopes = []Scope{{Label: "repos", Repos: func(*core.Shared) []repo.Repo { return nil }}}
@@ -134,9 +124,7 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, incl
 			fmt.Sprintf("push local commits — %d of %d %s ahead", ahead, n, noun)),
 	}
 
-	// The include-root row only earns a place when the provider can yield a root (a base that
-	// isn't a checkout adds nothing) and the active scope accepts it (a scope may ExcludeRoot —
-	// e.g. a submodules-only scope the root, a clone, has no place in).
+	// Offer the include-root row only when there is a root and the scope accepts it.
 	if rootOK && !scopes[i].ExcludeRoot {
 		state := "off"
 		if includeRoot {
@@ -235,11 +223,9 @@ func syncNote(o Op, s repo.GitSync) string {
 	}
 }
 
-// newBatchTask runs the operation over every repo in scope, sequentially, streaming each
-// repo's output under its own header. Sequential is deliberate: interleaved output from
-// concurrent pulls is unreadable, and reading what git said is the whole point of this
-// screen (the concurrent, no-confirm path is a caller's fetch key). ctx is checked between
-// repos so esc abandons the rest.
+// newBatchTask runs the operation on each repo in turn, streaming each under its own
+// header (concurrent output would be unreadable). ctx is checked between repos so esc
+// stops the rest.
 func newBatchTask(scopes []Scope, i int, root RootOption, includeRoot bool, o Op, label string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
 	var done, failed int
 	run := func(ctx context.Context, sh *core.Shared, report func(string, ...any), doneCh chan<- core.TaskEvent) {

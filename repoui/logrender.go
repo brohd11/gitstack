@@ -10,13 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Rendering the commit log. Pure functions over []repo.Commit — no bubbletea, no viewport —
-// so the layout is testable on strings alone, the same split diffrender.go keeps.
-//
-// The two modes answer different questions. One line is the shape of `git log --oneline`:
-// as many commits on screen at once as the terminal has rows, which is what you want when
-// the question is "what has been happening". Standard is git's default block — author, date,
-// and the full message — which is what you want once you've found the commit.
+// Rendering the commit log as pure functions over []repo.Commit. One line mirrors the
+// oneline log format (many commits at once); standard is git's full block.
 
 // ---------- the message indent ----------
 
@@ -26,13 +21,8 @@ const msgIndent = "    "
 
 // ---------- palette ----------
 
-// Git's own decorate colors, so the log reads the way it does in a terminal: the commit in
-// yellow, HEAD in cyan, local branches green, remote branches red, tags a bolder yellow.
-//
-// Raw ANSI numbers rather than theme colors, for the reason diffrender.go gives about +/-:
-// these are semantic — they mean "this is a tag", not "this is emphasis" — and resolving
-// against the user's own 16-color palette is what makes them match the terminal they're
-// sitting in. core.Theme's five colors are framework roles and shouldn't grow git vocabulary.
+// Git's decorate colors (commit yellow, HEAD cyan, local green, remote red, tags bold
+// yellow), as raw ANSI so they match the user's terminal, like the diff colors.
 const (
 	shaColor    = lipgloss.ANSIColor(3) // yellow, git's commit color
 	headColor   = lipgloss.ANSIColor(6) // cyan
@@ -79,9 +69,8 @@ func renderOneline(commits []repo.Commit, truncated bool, width int, wrap bool) 
 
 // ---------- standard ----------
 
-// renderStandard is git's default block, in git's order, so the two are readable against
-// each other: the commit and its decorations, the parents when it's a merge, who wrote it
-// and when, then the message indented four.
+// renderStandard is git's default block, in git's order: commit and refs, merge parents,
+// author and date, message indented four.
 func renderStandard(commits []repo.Commit, truncated bool, width int, wrap bool) string {
 	var rows []string
 	for i, c := range commits {
@@ -125,9 +114,7 @@ func mergeParents(parents []string) string {
 	return strings.Join(short, " ")
 }
 
-// shortHashLen is git's usual abbreviation length. The log's own %h may be longer in a repo
-// big enough to need it, but the Merge line is built from full parent hashes and has to
-// shorten them here.
+// shortHashLen shortens the full parent hashes on the Merge line.
 const shortHashLen = 7
 
 func shortHash(h string) string {
@@ -139,9 +126,8 @@ func shortHash(h string) string {
 
 // ---------- shared ----------
 
-// renderRefs is the parenthesized decoration list, each ref in its own color:
-// "(HEAD -> main, tag: v1.0.0, origin/main)". Empty when the commit carries no refs, so the
-// caller can leave the space out entirely rather than render an empty "()".
+// renderRefs renders "(HEAD -> main, tag: v1.0.0, origin/main)", each ref colored; empty
+// when there are none.
 func renderRefs(refs []repo.Ref) string {
 	if len(refs) == 0 {
 		return ""
@@ -167,9 +153,8 @@ func renderRefs(refs []repo.Ref) string {
 	return paren.Render("(") + strings.Join(parts, sep) + paren.Render(")")
 }
 
-// truncNote names the cut when the capture hit its limit. A log that stops at 500 commits
-// looks exactly like a repo with 500 commits, so the difference has to be said out loud —
-// the rows above it are the truth about the recent history, not about the whole of it.
+// truncNote says when the capture hit its limit, since a cut log looks like a short
+// history.
 func truncNote(n int, truncated bool, width int, wrap bool) []string {
 	if !truncated {
 		return nil

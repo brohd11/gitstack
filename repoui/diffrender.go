@@ -11,14 +11,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Parsing and rendering the unified diff format. Pure functions — no bubbletea, no
-// viewport — so the layout logic (which is the hard part, and the part with edge cases)
-// is testable on strings alone. DiffScreen owns the terminal side.
-//
-// The two layouts answer different questions. Unified is git's own form, reads at any
-// width, and shows a change as a deletion followed by an addition. Side-by-side puts the
-// before and after on one row, which is what you want when a line was *edited* rather
-// than added or removed — but it costs half the width per side, hence minSplitWidth.
+// Parsing and rendering unified diffs as pure functions, testable on strings; DiffScreen
+// owns the terminal. Unified is git's form and works at any width; side by side shows an
+// edited line's before and after on one row but needs minSplitWidth.
 
 // kind classifies a parsed line. It doubles as the marker character for content lines,
 // which is what git itself uses in column 0.
@@ -31,10 +26,8 @@ const (
 	kindDel     = '-'
 )
 
-// diffLine is one parsed line of a diff, with the line numbers it occupies on each side.
-// A number is 0 when the line doesn't exist on that side: an addition has no old number,
-// a deletion has no new one, and headers have neither. That's what lets the split
-// renderer put a line in the correct column without re-reading the marker.
+// diffLine is one parsed line with its old and new line numbers (0 where it does not
+// exist: additions have no old number, deletions no new), which places it in a column.
 type diffLine struct {
 	kind  byte
 	text  string // the content, marker stripped and tabs expanded
@@ -43,29 +36,16 @@ type diffLine struct {
 	noEOL bool // git's "\ No newline at end of file" applies to this line
 }
 
-// tabStop is what a tab expands to. Diff text lands in fixed-width cells, so tabs have to
-// become spaces before anything can be measured or truncated — a raw tab would make every
-// width calculation lie and knock the split columns out of alignment. 4 matches gofmt's
-// rendering, which is what this repo's own diffs are made of.
+// tabStop is the tab width; tabs become spaces before measuring, or widths and columns
+// would be wrong. 4 matches gofmt.
 const tabStop = 4
 
-// binaryNote replaces git's own binary line, which says nothing the page doesn't already
-// show: "Binary files a/x and b/x differ" restates — twice — the path the file header
-// spells out one line up, and the --no-index capture that renders an untracked file makes
-// it worse ("Binary files /dev/null and b/x differ"), leaking the null device the diff was
-// taken against. That's a detail of how the answer was obtained, not part of the answer.
-//
-// What the note is actually for is the absence beneath it: a file header with no hunks
-// under it needs a reason, and "it's binary" is the whole reason. "binary file" is the
-// wording fileDesc already uses for this condition on the picker row.
+// binaryNote replaces git's "Binary files a/x and b/x differ", which repeats the path
+// (and leaks /dev/null for untracked files). It explains a file header with no hunks.
 const binaryNote = "binary file — contents not shown"
 
-// parseDiff turns git's raw unified output into lines the renderers can lay out.
-//
-// The subtlety is that "---" and "+++" (the file's from/to header) begin with the same
-// characters as content lines. They're distinguished by position, not spelling: content
-// only exists inside a hunk, so a marker is only content once a @@ header has opened one.
-// Reading them as content would silently prepend two bogus rows to every file.
+// parseDiff turns git's unified output into lines. "---"/"+++" headers look like content,
+// so they are told apart by position: content exists only after a @@ header.
 func parseDiff(raw string) []diffLine {
 	var (
 		lines  []diffLine
@@ -80,9 +60,8 @@ func parseDiff(raw string) []diffLine {
 			inHunk = false
 			lines = append(lines, diffLine{kind: kindFile, text: gitHeaderPath(line)})
 
-		// Everything git prints between the "diff --git" line and the first hunk. The
-		// blob hashes and the a/ b/ paths restate the header, so they're dropped; the
-		// mode/rename/binary notes say something the header doesn't, so they're kept.
+		// Between "diff --git" and the first hunk: index and path lines repeat the header and are
+		// dropped; mode, rename and binary notes are kept.
 		case !inHunk && (strings.HasPrefix(line, "index ") ||
 			strings.HasPrefix(line, "--- ") ||
 			strings.HasPrefix(line, "+++ ") ||
@@ -114,12 +93,8 @@ func parseDiff(raw string) []diffLine {
 			}
 
 		case strings.HasPrefix(line, "\\"):
-			// "\ No newline at end of file" is a note about the line above, not a line of
-			// its own — and git emits it *between* a hunk's deletions and its additions.
-			// Left as a line it would cut the deletion run short, and the split layout
-			// would stop pairing an edited line against its own replacement: the before
-			// and after would land on separate rows, which is the one thing that layout
-			// exists to avoid. So it rides on the line it describes.
+			// "\ No newline at end of file" attaches to the line above. Git emits it between a hunk's
+			// deletions and additions, and as its own line it would break the split layout's pairing.
 			if n := len(lines) - 1; n >= 0 {
 				lines[n].noEOL = true
 			}
@@ -148,9 +123,8 @@ func parseDiff(raw string) []diffLine {
 	return lines
 }
 
-// gitHeaderPath pulls the readable path out of `diff --git a/x b/y`. It reports the
-// b-side (where the file ended up), or "old → new" for a rename, so the header says what
-// happened without the reader decoding two prefixed paths.
+// gitHeaderPath extracts the b-side path from the "diff --git a/x b/y" line, or
+// "old → new" for a rename.
 func gitHeaderPath(line string) string {
 	rest := strings.TrimPrefix(line, "diff --git ")
 	// Paths containing " b/" can't be split reliably; git quotes those, and the header is
@@ -167,13 +141,8 @@ func gitHeaderPath(line string) string {
 	return from + " → " + to
 }
 
-// parseHunkHeader reads the starting line numbers out of "@@ -oldStart,n +newStart,n @@".
-// A malformed header yields 1,1 — the numbers are a reading aid, so a wrong gutter beats
-// refusing to show the hunk.
-//
-// Only fields 1 and 2 are read, never a scan for the first "-"/"+" field: git appends the
-// enclosing context to the header ("@@ -12,7 +12,9 @@ func Run() {"), and that trailing
-// text is source code, which can itself begin with a marker character.
+// parseHunkHeader reads the start lines from "@@ -a,n +b,n @@", or 1,1 if malformed. Only
+// fields 1 and 2 are read: the trailing context text is source code.
 func parseHunkHeader(line string) (oldN, newN int) {
 	oldN, newN = 1, 1
 	fields := strings.Fields(line)
@@ -210,12 +179,8 @@ const eolNote = `\ No newline at end of file`
 
 // ---------- styles ----------
 
-// Add/delete color stays here rather than in core.Theme. The theme's five colors are
-// semantic framework roles (muted, log, border, accent, on-accent); "added" and "removed"
-// are a diff's concepts, and pushing them into core would mean editing all six presets
-// for one screen's benefit. ANSI 2/1 resolve against the user's own terminal palette, so
-// they read correctly under every theme — the same reasoning the "mono" theme uses in
-// leaning on the terminal's colors.
+// Add/delete colors are ANSI 2 and 1 rather than theme roles: they are diff semantics and
+// follow the user's terminal palette under every theme.
 const (
 	addColor = lipgloss.ANSIColor(2)
 	delColor = lipgloss.ANSIColor(1)
@@ -225,9 +190,9 @@ const (
 // core/styles.go: colors are read at render time so a theme switch repaints.
 func addStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(addColor) }
 func delStyle() lipgloss.Style  { return lipgloss.NewStyle().Foreground(delColor) }
-func metaStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(core.MutedColor) }
+func metaStyle() lipgloss.Style { return core.MutedStyle() }
 func fileStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(core.FocusedColor).Bold(true)
+	return core.AccentStyle()
 }
 
 // lineStyle is the style for a content line's text, by kind.
@@ -248,9 +213,8 @@ func lineStyle(kind byte) lipgloss.Style {
 // wobble narrower than a reader expects.
 const minGutter = 3
 
-// fileSepRule chooses what divides one file's diff from the next in a multi-file view:
-// a muted rule across the width, or a plain blank line. Compile-time because this is a
-// taste check, not a setting — flip it and rebuild to compare.
+// fileSepRule picks a muted rule (true) or a blank line between files; a compile-time
+// style choice.
 const fileSepRule = true
 
 // fileRule is the rule drawn between files when fileSepRule is on. Muted, like the hunk
@@ -262,10 +226,8 @@ func fileRule(width int) string {
 	return metaStyle().Render(strings.Repeat("─", width))
 }
 
-// renderUnified lays the diff out in git's own form: one column, each content line kept
-// under its marker, with the old and new line numbers in a gutter. The marker stays here
-// (unlike the split layout) because with one column there's no left/right to tell an
-// addition from a deletion — only the marker and the color do.
+// renderUnified renders git's one-column form with an old/new line-number gutter. The
+// marker stays, since with one column only it and color tell additions from deletions.
 func renderUnified(lines []diffLine, width int, wrap bool) string {
 	gw := gutterWidth(lines)
 	textW := width - unifiedGutter(gw) - 1 // the gutter, plus the marker column
@@ -303,19 +265,12 @@ func renderUnified(lines []diffLine, width int, wrap bool) string {
 	return b.String()
 }
 
-// unifiedGutter is the cell width of the "old new │" number gutter, kept in one place so
-// the width the text is fitted to and the blank a continuation row is padded with can't
-// drift apart.
+// unifiedGutter is the "old new │" gutter width, shared by fitting and padding.
 func unifiedGutter(gw int) int { return 2*gw + 3 }
 
-// unifiedRow renders one content line: the two number columns, a rule, then the marker
-// and the text. When wrapped, the continuation rows get a blank gutter and a blank marker
-// column, so the numbers still mark where each real line begins and the marker isn't
-// repeated down a folded line as though each row were its own change.
-//
-// Each row is styled on its own rather than styling the whole folded block at once:
-// lipgloss pads a multi-line render out to its widest line, so styling the block would
-// silently widen every row to match the longest — pushing them past the terminal.
+// unifiedRow renders one content line: numbers, rule, marker, text. Wrapped continuations
+// get a blank gutter and marker. Rows are styled individually: styling the block would
+// pad every row to the widest.
 func unifiedRow(l diffLine, gw, textW int, wrap bool) string {
 	gutter := metaStyle().Render(fmt.Sprintf("%s %s │", num(l.oldN, gw), num(l.newN, gw)))
 	blank := metaStyle().Render(strings.Repeat(" ", unifiedGutter(gw)-2) + " │")
@@ -334,18 +289,15 @@ func unifiedRow(l diffLine, gw, textW int, wrap bool) string {
 
 // ---------- side by side ----------
 
-// minSplitWidth is the terminal width below which the split layout stops being worth its
-// own cost: two columns plus two gutters leave each side under ~40 cells, at which point
-// nearly every line of code is truncated and the comparison the layout exists for is the
-// thing you can no longer do. DiffScreen renders unified instead and says so.
+// minSplitWidth is the width below which side by side leaves each side too narrow for
+// code; DiffScreen renders unified instead and says so.
 const minSplitWidth = 100
 
 // splitSep divides the two columns.
 const splitSep = " │ "
 
-// renderSplit lays the old and new text side by side. Markers are dropped: the column a
-// line sits in already says which side it's on, and the line-number gutters confirm it,
-// so a +/- would only spend a cell repeating them.
+// renderSplit lays old and new text side by side, without markers (the column says which
+// side).
 func renderSplit(lines []diffLine, width int, wrap bool) string {
 	gw := gutterWidth(lines)
 	colW := (width - lipgloss.Width(splitSep)) / 2
@@ -389,11 +341,8 @@ func renderSplit(lines []diffLine, width int, wrap bool) string {
 			}
 
 		case kindDel, kindAdd:
-			// A run of deletions followed by a run of additions is one edit, so pair the
-			// two runs off index-wise: the n-th line before against the n-th line after.
-			// The runs are rarely the same length, and the leftover on the longer side
-			// pairs against a blank — which is exactly how a pure add or pure delete
-			// (an empty opposite run) falls out of the same code.
+			// Pair a deletion run with the following addition run line by line; leftovers pair with a
+			// blank, which also covers pure adds and deletes.
 			dels, adds, next := changeRuns(lines, i)
 			for j := 0; j < max(len(dels), len(adds)); j++ {
 				var d, a *diffLine
@@ -416,9 +365,8 @@ func renderSplit(lines []diffLine, width int, wrap bool) string {
 	return b.String()
 }
 
-// changeRuns collects the run of deletions starting at i and the run of additions that
-// follows it, returning the index of the first line after both. git emits a hunk's
-// deletions before its additions, so this is the shape every edit arrives in.
+// changeRuns collects the deletions at i and the additions after them (git's order within
+// a hunk), returning the next index.
 func changeRuns(lines []diffLine, i int) (dels, adds []diffLine, next int) {
 	for ; i < len(lines) && lines[i].kind == kindDel; i++ {
 		dels = append(dels, lines[i])
@@ -429,12 +377,8 @@ func changeRuns(lines []diffLine, i int) (dels, adds []diffLine, next int) {
 	return dels, adds, i
 }
 
-// splitRow renders one row of the split layout: oldL in the left column under its old
-// line number, newL in the right under its new one. Either side may be nil, which renders
-// as an empty cell — the padding that keeps a lopsided edit's rows lined up. When
-// wrapped, the two cells will disagree on height, so both are padded to the taller one;
-// without that, every row after the first long line would be offset from its counterpart
-// and the two columns would stop meaning anything.
+// splitRow renders one split row: oldL left, newL right, nil as an empty cell. Wrapped
+// cells are padded to the taller one so the columns stay aligned.
 func splitRow(oldL, newL *diffLine, gw, colW, textW int, wrap bool) string {
 	left := splitCell(oldL, oldSide, gw, colW, textW, wrap)
 	right := splitCell(newL, newSide, gw, colW, textW, wrap)
@@ -457,10 +401,8 @@ func splitRow(oldL, newL *diffLine, gw, colW, textW int, wrap bool) string {
 	return strings.Join(rows, "\n")
 }
 
-// side selects which of a line's two numbers a column shows. It's a parameter rather than
-// something splitCell infers from the kind, because a context line carries both numbers
-// and appears in both columns — inferring would print its old number on both sides, which
-// silently drifts wrong the moment a hunk's additions and deletions are uneven.
+// side picks which line number a column shows: a context line appears in both columns
+// with different numbers.
 type side bool
 
 const (
@@ -516,10 +458,8 @@ func num(n, w int) string {
 	return fmt.Sprintf("%*d", w, n)
 }
 
-// fit makes text occupy at most width cells per row: wrapped across rows, or truncated
-// with an ellipsis marking what was cut. ansi.Wrap (as the log pane uses) breaks inside a
-// token when it has to, so an unbroken 300-character line folds instead of being clipped
-// straight back off by the viewport.
+// fit makes text at most width cells per row, wrapped (breaking long tokens) or truncated
+// with an ellipsis.
 func fit(text string, width int, wrap bool) string {
 	if width < 1 {
 		width = 1

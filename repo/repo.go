@@ -1,13 +1,7 @@
-// Package repo is the domain-neutral git engine: read-only status probes and mutating
-// operations over plain filesystem paths, with progress surfaced through a Reporter
-// callback. It knows nothing of any manifest, addon, or app that drives it — it operates
-// on directories and git, so it can back any tool that views or works a tree of git
-// checkouts. The screens that render it live in the sibling repoui package.
-//
-// This file holds the read-only half: discovery (FindGitRepos), working-tree state
-// (HasUncommittedChanges, GitChanges), upstream divergence (GitSyncStatus), and the one
-// network call (GitFetch) plus its fan-out (FetchAll). The mutating/streaming operations
-// (pull/push/commit) are in ops.go.
+// Package repo is a domain-neutral git engine over plain directories: read-only probes
+// and mutating operations, reporting progress through a Reporter. The screens live in
+// repoui. This file is the read-only half (discovery, status, divergence, fetch); ops.go
+// has pull, push and commit.
 package repo
 
 import (
@@ -26,16 +20,11 @@ import (
 	"github.com/brohd11/goutil/strutil"
 )
 
-// Reporter is a sink for human-readable progress lines. A CLI prints them to stdout; a
-// TUI funnels them into its log — the engine only calls it, never assumes where they go.
-// It's an alias of goutil/stream's Reporter, so a reporter written for one works with the
-// other without conversion.
+// Reporter receives progress lines (goutil/stream's type, so reporters work with both).
 type Reporter = stream.Reporter
 
-// Repo is one git checkout a caller wants viewed or operated on: its display name and
-// working directory, plus optional cached state (the checked-out branch and the last-read
-// divergence/dirty flags) that a screen can render without re-reading git. The engine's own
-// operations take a plain dir; Repo is the value the caller carries a repo around as.
+// Repo is a checkout a caller carries around: display name, directory, and optional cached
+// state (branch, divergence, dirty) to render without re-reading git.
 type Repo struct {
 	Name   string
 	Dir    string
@@ -49,9 +38,8 @@ type Repo struct {
 // fire hundreds of parallel git processes (and trip host rate limits).
 const maxConcurrentFetch = 8
 
-// CurrentBranch returns the branch checked out in dir, or "" when dir isn't a git checkout
-// (no `.git` entry), the HEAD is detached, or git can't be read. A cheap local read, so a
-// viewer can label every repo it scans.
+// CurrentBranch returns dir's checked-out branch, or "" for a non-checkout, detached HEAD
+// or unreadable repo.
 func CurrentBranch(dir string) string {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return ""
@@ -62,9 +50,7 @@ func CurrentBranch(dir string) string {
 	return ""
 }
 
-// Describe reads dir's live git state into a Repo carrying the given display name: its
-// checked-out branch, divergence from upstream, and whether the working tree is dirty. Every
-// read is local (no network), so it's cheap enough to call per repo on a fresh scan.
+// Describe reads dir's branch, divergence and dirty state (all local, no network).
 func Describe(name, dir string) Repo {
 	return Repo{
 		Name:   name,
@@ -75,10 +61,8 @@ func Describe(name, dir string) Repo {
 	}
 }
 
-// Scan finds every git checkout nested under base (to maxDepth, base itself excluded) and
-// describes each — the one call a repo viewer needs to turn a directory into a list of
-// status-bearing repos. Each Repo's Name is its base-relative path, Dir its absolute path.
-// Results are in FindGitRepos order (a sorted filesystem walk).
+// Scan finds every checkout under base (to maxDepth, base excluded) and describes each.
+// Name is the base-relative path, Dir absolute; results are in walk order.
 func Scan(base string, maxDepth int) ([]Repo, error) {
 	rels, err := FindGitRepos(base, maxDepth)
 	if err != nil {
@@ -91,9 +75,8 @@ func Scan(base string, maxDepth int) ([]Repo, error) {
 	return out, nil
 }
 
-// DescribeRoot reads base's own git state as a Repo marked Root, for a viewer that wants to
-// surface the scanned directory itself (which Scan/FindGitRepos deliberately omit). ok is false
-// when base is not a git checkout. Name is base's final path element.
+// DescribeRoot describes base itself, marked Root, for viewers that show the scanned
+// directory (which Scan omits). ok is false when base is not a checkout.
 func DescribeRoot(base string) (Repo, bool) {
 	if _, err := os.Stat(filepath.Join(base, ".git")); err != nil {
 		return Repo{}, false
@@ -103,11 +86,8 @@ func DescribeRoot(base string) (Repo, bool) {
 	return r, true
 }
 
-// StatusMarker renders the warning suffix from a Repo's cached git state — behind / ahead /
-// dirty — as a bracketed suffix a caller can append to the repo's name or to a header line
-// (e.g. "  ⚠ [behind origin 2 / ahead 1 / uncommitted changes]"). Empty when the repo is in
-// sync with its upstream and clean. The counts are as fresh as the caller's last read —
-// Describe/Scan fill them, and a fetch followed by a re-describe is how they settle.
+// StatusMarker renders the behind/ahead/dirty suffix from cached state, e.g.
+// "  ⚠ [behind origin 2 / ahead 1 / uncommitted changes]"; empty when clean and in sync.
 func StatusMarker(r Repo) string {
 	var parts []string
 	if r.Sync.Behind > 0 {
@@ -125,9 +105,8 @@ func StatusMarker(r Repo) string {
 	return "  ⚠ [" + strings.Join(parts, " / ") + "]"
 }
 
-// HasUncommittedChanges reports whether dir is a git checkout (a standalone clone or
-// a submodule) with a dirty working tree (modified or untracked files). False when
-// dir isn't a checkout (no `.git` entry) or the tree is clean.
+// HasUncommittedChanges reports whether dir is a checkout with modified or untracked
+// files.
 func HasUncommittedChanges(dir string) bool {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return false
@@ -135,21 +114,16 @@ func HasUncommittedChanges(dir string) bool {
 	return GitOutput(dir, "status", "--porcelain") != ""
 }
 
-// GitSync is a checkout's divergence from its upstream tracking branch, as of the last
-// fetch. Reading it touches no network — it compares HEAD against the remote-tracking ref
-// git already has on disk, so it's the same cost class as HasUncommittedChanges and cheap
-// enough to recompute on every inspect. The flip side is that it stays stale until
-// something runs GitFetch, which is git's own model (`git status` says "behind" off the
-// same stale ref).
+// GitSync is a checkout's divergence from its upstream as of the last fetch: a local
+// comparison, stale until GitFetch runs (as `git status` is).
 type GitSync struct {
 	Ahead    int  // local commits not on the upstream (unpushed)
 	Behind   int  // upstream commits not local (unpulled)
 	Tracking bool // false when dir isn't a checkout, HEAD is detached, or the branch has no upstream
 }
 
-// GitSyncStatus reports dir's divergence from its upstream. The zero value (Tracking
-// false) covers every case with nothing to compare: not a checkout, a detached HEAD, or a
-// branch that tracks nothing — GitOutput folds all of those into an empty string.
+// GitSyncStatus reports dir's divergence; the zero value covers non-checkouts, detached
+// HEAD and untracked branches.
 func GitSyncStatus(dir string) GitSync {
 	// An empty dir would resolve ".git" against the process's cwd — which may well be a
 	// repo — and report a wholly unrelated checkout's divergence.
@@ -159,9 +133,7 @@ func GitSyncStatus(dir string) GitSync {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return GitSync{}
 	}
-	// --left-right --count over the symmetric difference prints "<left>\t<right>": commits
-	// reachable from the upstream but not HEAD (behind), then from HEAD but not the
-	// upstream (ahead).
+	// Prints "<behind>\t<ahead>" over the symmetric difference.
 	out := GitOutput(dir, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
 	fields := strings.Fields(out)
 	if len(fields) != 2 {
@@ -175,30 +147,23 @@ func GitSyncStatus(dir string) GitSync {
 	return GitSync{Ahead: ahead, Behind: behind, Tracking: true}
 }
 
-// GitFetch updates dir's remote-tracking refs from its remote, so a following
-// GitSyncStatus reports a current ahead/behind. It's the one network-bound git call in
-// this file, hence the ctx (cancel/deadline) and the explicit error — GitOutput can't
-// serve here, since it has neither. GIT_TERMINAL_PROMPT=0 (as on the clone paths) makes a
-// repo whose credentials aren't cached fail fast rather than block forever on an
-// interactive prompt no TUI can answer.
+// GitFetch updates dir's remote-tracking refs so GitSyncStatus is current. It is the
+// network call, so it takes ctx and returns errors; credential prompts fail fast
+// (GitEnv).
 func GitFetch(ctx context.Context, dir string) error {
 	_, err := runGitCtx(ctx, dir, "fetch")
 	return err
 }
 
-// FetchResult is one repo's outcome from FetchAll: the fetch error (nil on success) and
-// the divergence read back afterwards, so a caller can report what the fetch revealed
-// without re-reading git itself.
+// FetchResult is one repo's FetchAll outcome: the error and the divergence read afterwards.
 type FetchResult struct {
 	Name string
 	Err  error
 	Sync GitSync
 }
 
-// FetchAll fetches every repo in repos, concurrently but capped at maxConcurrentFetch, and
-// reads each one's post-fetch divergence. Callers pass only the checkouts worth fetching
-// (this engine does not filter). ctx bounds the whole batch — a cancel aborts the in-flight
-// fetches. Results are name-sorted so the caller's output is deterministic.
+// FetchAll fetches every repo concurrently (capped at maxConcurrentFetch) and reads each
+// one's divergence. ctx bounds the batch. Results are sorted by name.
 func FetchAll(ctx context.Context, repos []Repo) []FetchResult {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -222,12 +187,9 @@ func FetchAll(ctx context.Context, repos []Repo) []FetchResult {
 	return out
 }
 
-// FindGitRepos returns base-relative paths of every git checkout nested under base
-// (excluding base itself), up to maxDepth directory levels deep. A directory is a
-// checkout when it has a `.git` entry (a directory for a standalone clone, a file
-// for a submodule — same test as HasUncommittedChanges). It descends into found
-// repos so nested submodules are reported too, but never walks into `.git`
-// internals, and skips unreadable entries rather than failing the whole walk.
+// FindGitRepos returns the base-relative paths of checkouts under base (base excluded) to
+// maxDepth levels, identified by a `.git` entry (directory or submodule file). It descends
+// into repos for nested submodules, never into `.git`, and skips unreadable entries.
 func FindGitRepos(base string, maxDepth int) ([]string, error) {
 	var repos []string
 	err := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
@@ -259,9 +221,8 @@ func FindGitRepos(base string, maxDepth int) ([]string, error) {
 	return repos, nil
 }
 
-// GitChange is one entry of `git status --porcelain`: the two-character status code (index
-// column, then worktree column) and the repo-relative path. Code "??" marks an untracked
-// file — the distinction the commit flow turns on, since `commit -a` will not include one.
+// GitChange is one `git status --porcelain` entry: the two-letter code and repo-relative
+// path. "??" is untracked, which `commit -a` does not include.
 type GitChange struct {
 	Code string
 	Path string
@@ -270,17 +231,9 @@ type GitChange struct {
 // Untracked reports whether the change is a file git isn't tracking yet.
 func (c GitChange) Untracked() bool { return c.Code == "??" }
 
-// GitChanges lists everything `git status --porcelain` reports in dir: staged changes,
-// unstaged modifications, and untracked files. Empty (not an error) for a clean tree or a
-// folder that isn't a checkout — the same tolerant reading as HasUncommittedChanges, which
-// is just the "is this list empty" question. core.quotepath=false keeps non-ASCII paths
-// readable rather than \NNN-escaped.
-//
-// -uall names every untracked file; status's default (-unormal) would collapse a new
-// directory into one "?? dir/" entry, and a directory is not something a caller can act on
-// one file at a time: the diff view has nothing to render for it (`diff --no-index` against
-// a directory fails), and the commit confirm would list "dir/" for a commit that stages its
-// files individually. The entry has to name a file for either to mean anything.
+// GitChanges lists everything `git status --porcelain` reports (empty for a clean tree or
+// non-checkout). -uall names every untracked file rather than collapsing a new directory,
+// since diffs and commit confirms act per file; quotepath=false keeps non-ASCII readable.
 func GitChanges(dir string) ([]GitChange, error) {
 	if dir == "" {
 		return nil, nil
@@ -288,16 +241,14 @@ func GitChanges(dir string) ([]GitChange, error) {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return nil, nil
 	}
-	out, err := exec.Command("git", "-C", dir, "-c", "core.quotepath=false", "status", "--porcelain", "-uall").Output()
+	out, err := gitCmd(context.Background(), dir, "-c", "core.quotepath=false", "status", "--porcelain", "-uall").Output()
 	if err != nil {
 		return nil, fmt.Errorf("could not read git status in %s: %w", dir, err)
 	}
 
 	var changes []GitChange
 	for _, line := range strings.Split(string(out), "\n") {
-		// "XY path" — the code is fixed-width, so the path starts at column 3. A rename
-		// arrives as "R  old -> new"; the whole "old -> new" is kept as the path, which is
-		// what a reader wants to see anyway.
+		// "XY path": the path starts at column 3; a rename's "old -> new" is kept whole.
 		if len(line) < 4 {
 			continue
 		}
@@ -309,37 +260,35 @@ func GitChanges(dir string) ([]GitChange, error) {
 	return changes, nil
 }
 
-// GitOutput runs a read-only `git -C dir <args...>` and returns its trimmed stdout,
-// or "" on any error (a folder may be a repo with no origin, etc.). Exported for callers
-// that need the same tolerant one-shot probe outside this engine.
+// GitOutput runs a read-only git command and returns its trimmed stdout, or "" on any
+// error (a repo with no origin, say).
 func GitOutput(dir string, args ...string) string {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	out, err := gitCmd(context.Background(), dir, args...).Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
 }
 
-// GitEnv is the environment every git subprocess this engine spawns runs with. Both
-// settings exist to guarantee git can never sit waiting for input a TUI has no way to
-// supply: GIT_TERMINAL_PROMPT=0 makes a repo with uncached credentials fail instead of
-// prompting, and GIT_EDITOR=true makes any path that would open an editor (a merge message,
-// say) take the empty-editor exit rather than hanging behind the UI forever. Exported for
-// callers that must spawn their own git subprocesses (e.g. gdaddon), so they inherit the
-// same never-prompt guarantee instead of re-spelling it.
+// GitEnv is the environment for every git subprocess: git must never wait on input a TUI
+// cannot supply, so credential prompts fail and any editor exits empty. Exported for
+// callers that spawn their own git (e.g. gdaddon).
 func GitEnv() []string {
 	return append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_EDITOR=true")
 }
 
-// runGitCtx runs a cancellable `git -C dir <args...>` under GitEnv and returns its combined
-// output verbatim. On error git's own words are folded into it (`%w: %s`) when it said
-// anything — that's the part worth reading — and the bare error is returned otherwise.
-// It backs the network calls (GitFetch, RemoteTags), which can't use GitOutput: they take
-// a ctx and their errors must reach the caller, not fold to "".
-func runGitCtx(ctx context.Context, dir string, args ...string) (string, error) {
+// gitCmd builds `git -C dir <args...>` under GitEnv. Every git subprocess in this package
+// starts here.
+func gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = GitEnv()
-	out, err := cmd.CombinedOutput()
+	return cmd
+}
+
+// runGitCtx runs a cancellable git command and returns its combined output. On error,
+// git's own message is folded into the error. Used by the network calls.
+func runGitCtx(ctx context.Context, dir string, args ...string) (string, error) {
+	out, err := gitCmd(ctx, dir, args...).CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {

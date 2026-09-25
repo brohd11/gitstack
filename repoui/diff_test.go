@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -20,12 +19,10 @@ const (
 
 func diffScreen(t *testing.T, width int) *DiffScreen {
 	t.Helper()
-	s := &DiffScreen{
-		title: "a.txt",
+	s := (&DiffScreen{
+		pager: newPager("a.txt", ""),
 		lines: parseDiff(sampleDiff),
-		vp:    viewport.New(),
-		width: -1,
-	}
+	}).wire()
 	s.SetSize(nil, width, 20)
 	return s
 }

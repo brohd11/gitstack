@@ -16,11 +16,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// The per-repo Git submenu: the routine half of working on a checkout — see what changed,
-// fetch, pull, commit, push — without leaving the app for a terminal. It is deliberately not
-// a git client. Every operation here either succeeds on the boring path or fails having
-// changed nothing, and says so; a divergence, a conflict, or a rebase is a decision, and
-// decisions belong in a real terminal.
+// The per-repo Git menu: status, fetch, pull, commit and push without leaving the app.
+// Each operation succeeds on the plain path or fails having changed nothing; divergence,
+// conflicts and rebases belong in a terminal.
 
 // stageOptions is the commit form's staging toggle, in index order. The default (index 0) is
 // the conservative one — see repo.GitCommit for why the distinction is load-bearing.
@@ -31,13 +29,10 @@ var stageOptions = []string{"tracked changes (-a)", stageAllOption}
 // Derived from the slice, not hardcoded: reordering stageOptions can't silently flip -a/-A.
 var stageAllIndex = slices.Index(stageOptions, stageAllOption)
 
-// RepoMenu builds the Git command hub for one checkout. Each row's Desc reads the repo's
-// current local git state (recomputed via the engine on build), so the menu itself answers
-// "what shape is this repo in" before you pick anything. PopStop makes it the hub the
-// sub-flows (task screens, the commit form) return to. It rebuilds on matching refreshes so popping
-// out of a finished pull doesn't land on rows that still say "3 behind". The breadcrumb
-// segment defaults to "Git"; hosts that reach the menu directly (a repo row, "ctrl+v") pass
-// a crumb — the repo name — so the trail still says where you are.
+// RepoMenu builds one checkout's Git hub. Row descriptions read the repo's current state,
+// and the menu rebuilds on matching refreshes, so it doubles as a status report. It is a
+// PopStop hub. The crumb defaults to "Git"; hosts reaching it from a repo row pass the
+// repo name.
 func RepoMenu(sh *core.Shared, r repo.Repo, crumb ...string) *components.PickerScreen {
 	crumbSeg := "Git"
 	if len(crumb) > 0 && crumb[0] != "" {
@@ -93,9 +88,7 @@ func repoItems(r repo.Repo) []list.Item {
 			Pick: func(sh *core.Shared) core.Action { return core.Push(DiffMenu(sh, r)) },
 		},
 		components.Item{
-			// Last of the three read-only rows, and it follows Diff for the same reason
-			// Diff follows Status: Diff is what changed and hasn't been committed, Log is
-			// what already was.
+			// Log follows Diff: uncommitted changes, then what was committed.
 			Name: "≡ Log",
 			Desc: logDesc(dir),
 			Pick: func(sh *core.Shared) core.Action { return core.Push(NewLogScreen(r)) },
@@ -123,9 +116,8 @@ func repoItems(r repo.Repo) []list.Item {
 	}
 }
 
-// The row descriptions read the current state, so the menu is a status report in itself. The
-// ahead/behind counts carry the same caveat as any marker: they're as fresh as the last
-// fetch, which is why Fetch sits at the top of this menu.
+// Row descriptions show current state; ahead/behind counts are as fresh as the last fetch,
+// hence Fetch at the top.
 
 func statusDesc(dirty bool) string {
 	if dirty {
@@ -156,9 +148,8 @@ func diffDesc(dir string) string {
 	return fmt.Sprintf("see what changed in %d file(s)", len(changes))
 }
 
-// logDesc is the last commit, which is both the description of what the row opens and the
-// most useful single line of it. GitOutput yields "" on any error, which is also what a repo
-// with no commits produces — and "no commits yet" is the right answer to both.
+// logDesc is the last commit; GitOutput's "" covers both errors and an empty repo, and
+// "no commits yet" suits both.
 func logDesc(dir string) string {
 	if last := repo.GitOutput(dir, "log", "-1", "--pretty=%h %s"); last != "" {
 		return "history — last: " + last
@@ -183,12 +174,9 @@ func tagsDesc(dir string) string {
 
 // ---------- commit ----------
 
-// newCommitForm asks for the message and what to stage. The staging toggle is not a
-// convenience: `git commit -a` stages only *tracked* files, so a file you just created would
-// silently miss the commit. Rather than pick a surprise for the user, the form makes the
-// choice explicit and the confirm screen shows its consequences. The toggle is returned
-// alongside the form so the host screen (newCommitScreen) can watch it and keep the
-// file list in sync.
+// newCommitForm asks for the message and what to stage. The -a mode skips new files, so
+// the choice is explicit and the confirm shows its effect. The toggle is returned so
+// newCommitScreen can keep the file list in sync.
 func newCommitForm(r repo.Repo) (*components.FormScreen, *components.ToggleField) {
 	// A commit message is the one field long enough to need it: NewTextAreaField wraps and
 	// grows downward where NewTextField would scroll the start of the line out of view.
@@ -237,11 +225,8 @@ func newCommitForm(r repo.Repo) (*components.FormScreen, *components.ToggleField
 	}), stageF
 }
 
-// newCommitScreen is the commit form as a ModularScreen: the form itself up top,
-// and below it a scrolling list of the files the commit will contain — the
-// answer the confirm screen could only truncate (maxCommitList), live, following
-// the stage toggle. The form's own behavior (validate → confirm → task) is
-// unchanged; esc still cancels, enter still submits.
+// newCommitScreen is the commit form above a scrolling list of the files the commit will
+// contain, following the stage toggle.
 func newCommitScreen(r repo.Repo) *components.ModularScreen {
 	form, stageF := newCommitForm(r)
 	files := components.NewScrollContainer(commitFilesTitle)
@@ -256,9 +241,7 @@ func newCommitScreen(r repo.Repo) *components.ModularScreen {
 	panel.refreshFiles()
 	return components.NewModularScreen(
 		[][]components.Slot{
-			// The form renders only as tall as its box; Expand hands the file
-			// list whatever rows the form doesn't use, so the pane reaches the
-			// bottom of the terminal instead of pooling slack below it.
+			// The file list takes the rows the form does not use.
 			{{Panel: panel, Weight: 1}, {Panel: files, Weight: 1, ExpandV: true}},
 		},
 		components.ModularOpts{
@@ -269,11 +252,8 @@ func newCommitScreen(r repo.Repo) *components.ModularScreen {
 	)
 }
 
-// commitPanel is the commit form's ScreenPanel plus the one domain behavior a
-// component can't carry: keeping the sibling file list in sync with the stage
-// toggle. It used to release tab to the host's pane cycle as well; the host owns
-// shift+arrows now instead, so tab is unconditionally the form's next-field key
-// and the file list is shift+↓ away from any row.
+// commitPanel is the commit form's ScreenPanel plus keeping the file list in sync with
+// the stage toggle.
 type commitPanel struct {
 	*components.ScreenPanel
 	form  *components.FormScreen
@@ -301,9 +281,8 @@ func (p *commitPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, bo
 // counts new files onto it.
 const commitFilesTitle = "Files to Commit"
 
-// refreshFiles rebuilds the file pane for the current staging mode: its legend, then
-// its body. Only a failed read or a clean tree renders as a status line — every state
-// that has files in it lists them.
+// refreshFiles rebuilds the file pane's legend and body; only a failed read or a clean
+// tree shows a status line.
 func (p *commitPanel) refreshFiles() {
 	preview, err := repo.CommitPreview(p.dir)
 	if err != nil {
@@ -348,13 +327,9 @@ func commitPreviewRows(files []repo.CommitFile) ([]repo.GitChange, map[string]*r
 	return changes, stats
 }
 
-// commitPaneLines is the pane's body, mirroring the confirm body's sections: the files
-// the commit will contain, then — when "-a" leaves new files behind — the untracked set
-// it won't, so the exclusion is visible before submit, not just at confirm. Uncapped:
-// scrolling is the point of the pane. A mode that commits nothing
-// still lists the new files under a line saying so, rather than going blank at the one
-// moment they are the only thing in the tree. Empty result ⇒ nothing changed at all,
-// and the caller shows a status line instead.
+// commitPaneLines is the file pane's body: the files the commit contains, then (under -a)
+// the untracked files it leaves out. Uncapped, since the pane scrolls. Empty means nothing
+// changed.
 func commitPaneLines(changes []repo.GitChange, stageAll bool, stats map[string]*repo.DiffStat) []string {
 	included := commitable(changes, stageAll)
 	untracked := excludedUntracked(changes)
@@ -402,10 +377,8 @@ func commitPaneLines(changes []repo.GitChange, stageAll bool, stats map[string]*
 	return lines
 }
 
-// commitPaneTitle counts new files onto the pane's legend. It does so in both modes:
-// "-a" excludes them and "-A" buries them at the end of a list that scrolls, so either
-// way the border is the only place their presence is visible without reading to the
-// bottom.
+// commitPaneTitle counts new files in the legend in both modes, since otherwise they are
+// either excluded or at the bottom of a long list.
 func commitPaneTitle(changes []repo.GitChange) string {
 	if n := len(excludedUntracked(changes)); n > 0 {
 		return fmt.Sprintf("%s (%d new)", commitFilesTitle, n)
@@ -425,10 +398,8 @@ func commitable(changes []repo.GitChange, stageAll bool) []repo.GitChange {
 	return out
 }
 
-// newCommitConfirm shows exactly what the commit will contain — and, when the mode excludes
-// them, exactly which new files it will leave behind. The re-read error is returned, not
-// swallowed: a confirm built on a failed read would claim "Commit 0 file(s)" while OnYes
-// commits the real tree — misrepresenting the one thing this screen exists to show.
+// newCommitConfirm shows what the commit contains and which new files it leaves out. A
+// failed re-read is returned rather than showing a misleading empty list.
 func newCommitConfirm(r repo.Repo, msg string, stageAll bool) (*components.DialogScreen, error) {
 	changes, err := repo.GitChanges(r.Dir) // re-read: the tree may have moved since the form opened
 	if err != nil {
@@ -445,14 +416,11 @@ func newCommitConfirm(r repo.Repo, msg string, stageAll bool) (*components.Dialo
 	}), nil
 }
 
-// maxCommitList caps each file list in the confirm body. A DialogScreen neither scrolls nor
-// clips (its SetSize is a no-op), so a repo with a hundred changed files would push the
-// status line and help bar off the terminal; the cap is what keeps the box a box.
+// maxCommitList caps each confirm list; a DialogScreen neither scrolls nor clips.
 const maxCommitList = 10
 
-// commitBody renders the confirm text: the files this commit will contain, then — only when
-// the mode leaves them out — the untracked files it won't, named so the omission is a choice
-// rather than a surprise.
+// commitBody renders the confirm text: the included files, then any untracked files the
+// mode leaves out.
 func commitBody(r repo.Repo, changes []repo.GitChange, msg string, stageAll bool) string {
 	included := commitable(changes, stageAll)
 
@@ -475,9 +443,7 @@ func commitBody(r repo.Repo, changes []repo.GitChange, msg string, stageAll bool
 	return strings.Join(append(lines, "", "message: "+msg), "\n")
 }
 
-// excludedUntracked is the set "-a" leaves behind: the untracked changes. The
-// confirm body names them as a warning; the commit screen's file pane lists them
-// below the included files, same idea, live.
+// excludedUntracked is what -a leaves behind: the untracked changes.
 func excludedUntracked(changes []repo.GitChange) []repo.GitChange {
 	var out []repo.GitChange
 	for _, c := range changes {
@@ -488,9 +454,8 @@ func excludedUntracked(changes []repo.GitChange) []repo.GitChange {
 	return out
 }
 
-// fileLines renders "  XY path" rows, capped at max rows with a trailing
-// "… and N more" when it truncates; max <= 0 renders them all (the commit
-// screen's scrolling pane, where truncating would defeat the point).
+// fileLines renders "  XY path" rows, capped at max with "… and N more"; max <= 0 renders
+// all.
 func fileLines(changes []repo.GitChange, max int) []string {
 	n := len(changes)
 	shown := n

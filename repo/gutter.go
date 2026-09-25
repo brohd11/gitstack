@@ -1,29 +1,19 @@
 package repo
 
 import (
+	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
-// Reading a file's baseline — the copy of it that HEAD holds. This is what an editor
-// needs to draw diff gutters, and it is deliberately NOT `git diff`.
-//
-// `git diff` describes what is on disk. An editor's gutter has to describe what is in
-// the buffer, which is a different thing the moment anyone types: every keystroke would
-// leave the markers a save behind. So the baseline is fetched once, and the consumer
-// diffs it against its own live text as often as it likes — no git process per
-// keystroke, and markers that move while you edit.
-//
-// The split also decides where the work goes. Fetching a blob is git's job and belongs
-// here; diffing two strings is not, and belongs to whoever owns the buffer.
+// Reading a file's HEAD copy for diff gutters. The consumer diffs it against its live
+// buffer (so markers track typing without a git process per keystroke); fetching the blob
+// belongs here, diffing belongs to whoever owns the buffer.
 
-// Baseline says what HEAD had to offer, which is as much a part of the answer as the
-// text is: a file with no baseline is not a file with no changes. Consumers render the
-// four cases differently — OK diffs, Absent is wholly new, Ignored and None get no
-// gutter at all.
+// Baseline is what HEAD had for a file: OK diffs, Absent is wholly new, Ignored and None
+// get no gutter.
 type Baseline int
 
 const (
@@ -47,38 +37,20 @@ func (b Baseline) String() string {
 	}
 }
 
-// RepoRoot is the checkout path enclosing path, found by asking git rather than by
-// walking for a .git entry: only git knows about worktrees, submodules and $GIT_DIR, and
-// a hand-rolled walk gets all three wrong. path may name a file or a directory; a file's
-// directory is what gets asked.
-//
-// This looks UP from a path, which is what an open document needs. FindGitRepos (repo.go)
-// looks DOWN from a base for many, which is what the repo lists need — the two are not
-// substitutes for each other.
+// RepoRoot is the checkout enclosing path (a file or a directory), asked of git so
+// worktrees, submodules and $GIT_DIR resolve correctly.
 func RepoRoot(path string) (string, bool) {
 	dir := path
 	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
 		dir = filepath.Dir(path)
 	}
-	if dir == "" {
-		return "", false
-	}
-	root := GitOutput(dir, "rev-parse", "--show-toplevel")
-	if root == "" {
-		return "", false
-	}
-	return filepath.Clean(root), true
+	root, err := RepoRootContext(context.Background(), dir)
+	return root, err == nil && root != ""
 }
 
-// HeadBlob returns HEAD's copy of path, which must lie inside the checkout at dir (see
-// RepoRoot). The Baseline is meaningful on every return, error or not; the text is only
-// meaningful with BaselineOK.
-//
-// The disambiguation is the whole subtlety. `git show HEAD:<p>` failing says nothing on
-// its own — the file might be untracked, ignored, outside the repo, or the repo might
-// have no commits — and every one of those wants a different gutter. So a failure is
-// narrowed rather than reported: no HEAD at all (a fresh `git init`) means every file is
-// new, an ignored path says so, and what is left is simply not in HEAD yet.
+// HeadBlob returns HEAD's copy of path (inside the checkout at dir). The Baseline is always
+// meaningful; the text only with BaselineOK. A failed `git show` is narrowed: no HEAD means
+// Absent, an ignored path is Ignored, and anything else is not in HEAD yet (Absent).
 func HeadBlob(dir, path string) (string, Baseline, error) {
 	if dir == "" || path == "" {
 		return "", BaselineNone, errors.New("no repo directory")
@@ -89,9 +61,7 @@ func HeadBlob(dir, path string) (string, Baseline, error) {
 		return "", BaselineNone, err
 	}
 
-	// A repo with no commits has no HEAD to show from, and asking anyway gets git's
-	// "fatal: ambiguous argument 'HEAD'". Every file in such a repo is new, which is
-	// exactly what Absent means.
+	// No commits: every file is new.
 	if !hasHEAD(dir) {
 		return "", BaselineAbsent, nil
 	}
@@ -106,10 +76,8 @@ func HeadBlob(dir, path string) (string, Baseline, error) {
 	return "", BaselineAbsent, nil
 }
 
-// IsIgnored reports whether path (repo-relative, or absolute inside dir) is matched by
-// the repo's ignore rules. check-ignore exits 0 for a match, 1 for none, and >1 for a
-// real failure — which is read as "not ignored", the answer that shows the user their
-// file rather than hiding it.
+// IsIgnored reports whether path (repo-relative or absolute) matches the ignore rules. A
+// check-ignore failure reads as "not ignored", which shows the file.
 func IsIgnored(dir, path string) bool {
 	rel := path
 	if filepath.IsAbs(path) {
@@ -118,30 +86,18 @@ func IsIgnored(dir, path string) bool {
 			return false
 		}
 	}
-	cmd := exec.Command("git", "-C", dir, "check-ignore", "-q", "--", rel)
-	cmd.Env = GitEnv()
-	return cmd.Run() == nil
+	return gitCmd(context.Background(), dir, "check-ignore", "-q", "--", rel).Run() == nil
 }
 
-// HeadOID is the commit HEAD points at, or "" when there is none. It is the cache key a
-// consumer invalidates baselines against: a commit, a checkout or a rebase moves HEAD,
-// and every baseline read before it is then a diff against the wrong thing.
+// HeadOID is the commit HEAD points at, or "": a key for invalidating cached baselines.
 func HeadOID(dir string) string {
 	return GitOutput(dir, "rev-parse", "HEAD")
 }
 
-// repoRel is path as git wants to hear it: relative to the checkout root and
-// slash-separated, because git speaks '/' on every platform including the one where
-// filepath does not. A path outside the checkout is an error rather than a "../" that
-// git would reject less clearly.
-//
-// Both sides go through realPath first, and that is not defensive tidying — it is the
-// difference between working and not on macOS. RepoRoot's answer comes from
-// `rev-parse --show-toplevel`, which resolves symlinks, so a checkout reached through one
-// (/tmp and /var both are on macOS, and plenty of people keep their code under one) comes
-// back as /private/var/... while the document is still /var/.... Relating those two
-// unresolved says the file is outside its own repository, and every such file silently
-// loses its baseline.
+// repoRel is path relative to the checkout root with '/' separators, as git wants; a path
+// outside is an error. Both sides go through realPath: rev-parse resolves symlinks (on
+// macOS /var is /private/var), and relating unresolved paths would put files outside their
+// own repo.
 func repoRel(dir, path string) (string, error) {
 	rel, err := filepath.Rel(realPath(dir), realPath(path))
 	if err != nil {
@@ -153,11 +109,9 @@ func repoRel(dir, path string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
-// realPath is p absolute and with symlinks resolved. Only the DIRECTORY is resolved and
-// the base name rejoined, so a file that does not exist yet — a new document about to be
-// saved — still lands under the same root as its neighbors; EvalSymlinks on the file
-// itself would fail and leave it unresolved. Every step falls back to the best answer so
-// far, since a path that cannot be resolved is still worth relating literally.
+// realPath makes p absolute with its directory's symlinks resolved (the base name is
+// rejoined, so a not-yet-existing file still resolves). Each step falls back to the best
+// answer so far.
 func realPath(p string) string {
 	abs, err := filepath.Abs(p)
 	if err != nil {

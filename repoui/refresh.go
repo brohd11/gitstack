@@ -5,9 +5,8 @@ import (
 	"strings"
 )
 
-// RepoRefreshMsg refreshes one checkout and the known enclosing repos whose
-// working-tree state may have changed with it (for example, a submodule's parent).
-// Hosts retain RefreshMsg for operations that require a full reload.
+// RepoRefreshMsg refreshes one checkout and the known repos around it (a submodule's
+// parent). RefreshMsg remains for full reloads.
 type RepoRefreshMsg struct{ Dir string }
 
 // Targets reports whether dir is the checkout the operation ran in.

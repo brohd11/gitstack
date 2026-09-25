@@ -30,9 +30,7 @@ func RepoRootContext(ctx context.Context, dir string) (string, error) {
 	if dir == "" {
 		return "", nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel")
-	cmd.Env = GitEnv()
-	out, err := cmd.Output()
+	out, err := gitCmd(ctx, dir, "rev-parse", "--show-toplevel").Output()
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
@@ -52,11 +50,9 @@ func ReadWorktreeStatus(ctx context.Context, dir string) (WorktreeStatus, error)
 	if err != nil || root == "" {
 		return WorktreeStatus{}, err
 	}
-	cmd := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", root,
+	out, err := gitCmd(ctx, root, "--no-optional-locks",
 		"status", "--porcelain=v2", "-z", "--untracked-files=all",
-		"--ignored=matching", "--ignore-submodules=none")
-	cmd.Env = GitEnv()
-	out, err := cmd.Output()
+		"--ignored=matching", "--ignore-submodules=none").Output()
 	if err != nil {
 		return WorktreeStatus{}, fmt.Errorf("read status: %w", err)
 	}

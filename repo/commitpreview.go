@@ -9,17 +9,15 @@ import (
 	"strings"
 )
 
-// CommitFile is a working-tree change with its prospective commit's line counts.
-// A nil Stat means counts could not be read; a non-nil zero Stat is a verified
-// change without textual additions or deletions.
+// CommitFile is a working-tree change with its line counts. A nil Stat means the counts
+// could not be read; a zero Stat is a change with no textual lines.
 type CommitFile struct {
 	Status FileStatus
 	Stat   *DiffStat
 }
 
-// CommitPreview reads all changed files, including untracked files, without
-// staging anything. Only a failed status read fails the preview; unavailable
-// statistics leave the affected files' Stat nil.
+// CommitPreview reads every changed file, untracked included, without staging. Only a
+// failed status read is an error.
 func CommitPreview(dir string) ([]CommitFile, error) {
 	status, err := ReadWorktreeStatus(context.Background(), dir)
 	if err != nil || len(status.Files) == 0 {

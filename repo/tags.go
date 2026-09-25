@@ -8,10 +8,7 @@ import (
 	"strings"
 )
 
-// LocalTags lists dir's tags, newest first by creator date. A read-only probe in
-// the CurrentBranch mold: any error (not a checkout, git unreadable) yields nil,
-// so a caller renders "no local tags" without having to distinguish failure from
-// empty.
+// LocalTags lists dir's tags, newest first by creator date; nil on any error.
 func LocalTags(dir string) []string {
 	out := GitOutput(dir, "tag", "--list", "--sort=-creatordate")
 	if out == "" {
@@ -26,13 +23,9 @@ func LocalTags(dir string) []string {
 	return tags
 }
 
-// RemoteTags lists the tags on dir's origin remote, newest first. It reads
-// the remote's ref advertisement directly (ls-remote) rather than the local
-// refs, because local refs can't answer "which tags does the remote have": a
-// fetch merges the remote's tags into the local namespace, where they become
-// indistinguishable from tags that only ever existed locally — and asking the
-// question shouldn't mutate anything anyway. It's a network call, so like
-// GitFetch it takes a ctx and folds git's stderr into the error.
+// RemoteTags lists origin's tags, newest first, via ls-remote: local refs cannot tell which
+// tags the remote has, and asking should not mutate anything. A network call, so it takes
+// ctx and returns errors.
 func RemoteTags(ctx context.Context, dir string) ([]string, error) {
 	out, err := runGitCtx(ctx, dir, "ls-remote", "--tags", "origin")
 	if err != nil {
@@ -41,18 +34,9 @@ func RemoteTags(ctx context.Context, dir string) ([]string, error) {
 	return parseLsRemoteTags(out), nil
 }
 
-// parseLsRemoteTags turns `git ls-remote --tags` output into a deduped list of
-// tag names, ordered newest-first to match LocalTags. Each line is
-// "<sha>\trefs/tags/<name>"; an annotated tag also lists a
-// "<sha>\trefs/tags/<name>^{}" line for the commit it peels to, which is dropped
-// — the tag is already named by its own line. Malformed lines are skipped rather
-// than failing the whole listing: a partial read shouldn't poison the tags that
-// did parse.
-//
-// "Newest" is version-descending (see compareVersionTags), not date-descending:
-// ls-remote's advertisement carries no dates, so local's creatordate order is
-// unreachable here — for the semver release tags this screen is built around,
-// the two orders agree in practice.
+// parseLsRemoteTags turns `ls-remote --tags` output into deduped tag names, newest first.
+// Peeled "^{}" lines are dropped and malformed lines skipped. Ordering is by version
+// (compareVersionTags), since ls-remote has no dates.
 func parseLsRemoteTags(out string) []string {
 	seen := map[string]bool{}
 	var tags []string
@@ -76,13 +60,9 @@ func parseLsRemoteTags(out string) []string {
 	return tags
 }
 
-// compareVersionTags orders two tags the way a release listing wants: split
-// each into alternating literal and numeric runs ("v1.10.2" → "v", 1, ".", 10,
-// ".", 2) and compare run by run — numeric runs by value (so v1.10.0 sorts
-// above v1.9.9, where plain string order inverts them), literal runs lexically.
-// A numeric run sorts before a literal one ("1.0.1" before "v1.0.1"), and on a
-// shared prefix the longer tag wins ("1.0.1" before "1.0.1.1"). Returns
-// -1/0/+1 like strings.Compare.
+// compareVersionTags compares tags by alternating literal and numeric runs ("v1.10.2" is
+// "v", 1, ".", 10, ".", 2), numbers by value, literals lexically. A numeric run sorts before
+// a literal one, and a longer tag wins on a shared prefix. Returns -1, 0 or +1.
 func compareVersionTags(a, b string) int {
 	ra, rb := versionRuns(a), versionRuns(b)
 	for i := 0; i < len(ra) && i < len(rb); i++ {
@@ -127,9 +107,8 @@ func versionRuns(s string) []string {
 	return runs
 }
 
-// compareDigitRuns orders two all-digit runs by numeric value without parsing
-// them (a run can be longer than an int holds): leading zeros are insignificant,
-// then more digits means a bigger number, then same-length runs order lexically.
+// compareDigitRuns compares digit runs numerically without parsing (they may overflow
+// int).
 func compareDigitRuns(a, b string) int {
 	a = strings.TrimLeft(a, "0")
 	b = strings.TrimLeft(b, "0")
@@ -157,14 +136,9 @@ func isDigits(s string) bool {
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
-// NextTag suggests the tag after the highest semver tag across local and
-// remote: the max of the two lists with its patch component bumped —
-// "1.0.1" → "1.0.2", "v2.3.9" → "v2.3.10". Only strict three-part versions
-// (optional "v" prefix) count; anything else (release-1, nightly) isn't a
-// release tag this can increment. The max compares the version triple only, so
-// a bare "2.0.0" outranks a "v1.9.9" — the display order's numeric-before-
-// literal tiebreak (compareVersionTags) would invert them. "" means neither
-// list held one, and the caller leaves its form empty.
+// NextTag suggests the tag after the highest strict three-part version (optional "v")
+// across local and remote, bumping the patch: "v2.3.9" → "v2.3.10". "" when neither has
+// one.
 func NextTag(local, remote []string) string {
 	best := ""
 	for _, tags := range [][]string{local, remote} {
@@ -222,17 +196,13 @@ func splitTagPrefix(t string) (prefix, num string) {
 	return "", t
 }
 
-// GitTag creates a lightweight tag on the current commit. It refuses an
-// existing name (git's own "already exists"), which is the backstop for a UI
-// that validated against a stale listing.
+// GitTag creates a lightweight tag on HEAD; an existing name fails.
 func GitTag(ctx context.Context, dir, name string, report Reporter) error {
 	report("%s", "$ git tag "+name)
 	return GitStream(ctx, dir, report, "tag", name)
 }
 
-// GitPushTag pushes one tag to origin: `git push origin <name>`. Pushing a tag
-// origin already has fails with git's own rejection in the log — which is the
-// answer when the "not on remote" diff behind the picker was stale.
+// GitPushTag pushes one tag to origin; git rejects one origin already has.
 func GitPushTag(ctx context.Context, dir, name string, report Reporter) error {
 	report("%s", "$ git push origin "+name)
 	return GitStream(ctx, dir, report, "push", "origin", name)

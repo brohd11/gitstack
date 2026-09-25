@@ -14,19 +14,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// The Tags screen: a sidebar of tag actions beside two stacked listings —
-// origin's tags over the local ones — so "is the release tag pushed yet" answers
-// itself at a glance. The remote half is a network read, so it loads async
-// (remoteTagsCmd, kicked off by the screen's Init) while the local half renders
-// immediately from disk. The actions all stay inside this hub: New Tag is a
-// one-field form prefilled with the next semver tag, Delete and Push are pickers
-// over the local list (Push's filtered to what origin doesn't have), and Fetch
-// just re-runs the remote load in place. The screen is the PopStop hub, so a
-// finished tag task's esc lands back here, not on the Git menu below it.
+// The Tags screen: tag actions beside origin's tags over the local ones, so whether a
+// release tag is on origin is visible at once. The remote list loads asynchronously (from
+// Init). New Tag is prefilled with the next semver; Delete and Push are pickers (Push
+// only over tags origin lacks); Fetch reloads the remote list. It is a PopStop hub.
 
-// remoteTagsTimeout caps the ls-remote behind the Tags screen, so an unreachable
-// origin fails the pane into an error line instead of spinning forever. Shorter
-// than FetchTimeout: it's one round-trip, not a fan-out.
+// remoteTagsTimeout caps the ls-remote so an unreachable origin shows an error.
 const remoteTagsTimeout = 30 * time.Second
 
 // remoteTagsMsg delivers one remoteTagsCmd load. ModularScreen fans non-key msgs
@@ -47,12 +40,8 @@ func remoteTagsCmd(dir string) tea.Cmd {
 	}
 }
 
-// tagListPanel is the remote-tags ScrollContainer plus the two domain behaviors
-// a component can't carry: what a remoteTagsMsg means, and remembering the
-// result — the sidebar's New/Push rows diff against the last load rather than
-// re-hitting the network. Embedding promotes the Panel/Focusable plumbing, so
-// the only override needed is UpdatePanel — claim the load result, otherwise
-// behave exactly like a ScrollContainer.
+// tagListPanel is the remote-tags ScrollContainer that handles remoteTagsMsg and keeps the
+// last result, which the New and Push rows compare against without another network read.
 type tagListPanel struct {
 	*components.ScrollContainer
 	tags []string // last successful load; nil while loading or after an error
@@ -81,9 +70,8 @@ func (p *tagListPanel) UpdatePanel(sh *core.Shared, msg tea.Msg) (core.Action, b
 	return p.ScrollContainer.UpdatePanel(sh, msg)
 }
 
-// Tags reports the last successful remote load (nil when none). The push picker
-// treats nil as "unknown" and offers every local tag — git's own "already
-// exists" rejection is the backstop for a stale or missing snapshot.
+// Tags returns the last successful remote load, or nil (unknown, so Push offers every
+// local tag and git rejects duplicates).
 func (p *tagListPanel) Tags() []string { return p.tags }
 
 // TagsScreen builds the tag view for one checkout.
@@ -159,12 +147,8 @@ func TagsScreen(sh *core.Shared, r repo.Repo) *components.ModularScreen {
 
 // ---------- new tag ----------
 
-// newTagForm is the one-field create form. The field is prefilled with the next
-// semver tag after the highest one origin or the local checkout knows about
-// (repo.NextTag), which is what a release flow wants nine times out of ten; the
-// user edits or retypes for the tenth. The remote panel doubles as the remote
-// snapshot, so the prefill needs no extra network read — it's whatever the last
-// load (or the in-flight one, as nil) left behind.
+// newTagForm is the one-field create form, prefilled with repo.NextTag from the last
+// remote load and the local tags.
 func newTagForm(r repo.Repo, remote *tagListPanel) *components.FormScreen {
 	form := components.NewForm(components.FormOpts{
 		Crumb: "New Tag",
@@ -236,10 +220,8 @@ func deleteTagPicker(r repo.Repo) *components.PickerScreen {
 
 // ---------- push ----------
 
-// pushTagPicker lists the local tags origin doesn't have (per the remote pane's
-// last load); picking one runs `git push origin <tag>`. A nil remote list means
-// "unknown", not "empty", so every local tag is offered — pushing one origin
-// already has just surfaces git's own rejection in the task log.
+// pushTagPicker lists local tags origin lacks (per the last load) and sends the picked one
+// to origin. A nil remote list offers every local tag.
 func pushTagPicker(r repo.Repo, remote []string) *components.PickerScreen {
 	onRemote := map[string]bool{}
 	for _, t := range remote {

@@ -6,7 +6,6 @@ import (
 
 	"github.com/brohd11/gitstack/repo"
 
-	"charm.land/bubbles/v2/viewport"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -45,14 +44,11 @@ var sampleCommits = []repo.Commit{{
 
 func logScreen(t *testing.T, truncated bool) *LogScreen {
 	t.Helper()
-	s := &LogScreen{
-		title:     "gitstack",
-		dir:       "/tmp/gitstack",
+	s := (&LogScreen{
+		pager:     newPager("gitstack", "/tmp/gitstack"),
 		commits:   sampleCommits,
 		truncated: truncated,
-		vp:        viewport.New(),
-		width:     -1,
-	}
+	}).wire()
 	s.SetSize(nil, logWidth, 40)
 	return s
 }
@@ -170,12 +166,10 @@ func TestLogTruncationNote(t *testing.T) {
 // one line renders it as one, so the two disagree sharply on how far down the content the
 // same offset lands.
 func TestLogTogglePreservesScroll(t *testing.T) {
-	s := &LogScreen{
-		title:   "gitstack",
+	s := (&LogScreen{
+		pager:   newPager("gitstack", ""),
 		commits: repeatCommits(30),
-		vp:      viewport.New(),
-		width:   -1,
-	}
+	}).wire()
 	s.SetSize(nil, logWidth, 8)
 	s.vp.SetYOffset(3)
 
@@ -201,12 +195,10 @@ func repeatCommits(n int) []repo.Commit {
 // A capture failure opens the screen and explains itself rather than rendering an empty log,
 // which would read as a repo with no history.
 func TestLogEmptyStateRenders(t *testing.T) {
-	s := &LogScreen{
-		title: "gitstack",
+	s := (&LogScreen{
+		pager: newPager("gitstack", ""),
 		empty: "this repo has no commits yet",
-		vp:    viewport.New(),
-		width: -1,
-	}
+	}).wire()
 	s.SetSize(nil, logWidth, 20)
 	if view := ansi.Strip(s.View(nil)); !strings.Contains(view, "this repo has no commits yet") {
 		t.Errorf("the empty state should be rendered in place of the log:\n%s", view)
