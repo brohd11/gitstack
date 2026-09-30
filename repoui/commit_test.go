@@ -9,6 +9,11 @@ import (
 	"github.com/brohd11/gitstack/repo"
 )
 
+// commitBody joins the commit confirm's legend and lines, the way the pane shows them.
+func commitBody(r repo.Repo, changes []repo.GitChange, msg string, stageAll bool) string {
+	return commitTitle(r, changes, stageAll) + "\n" + strings.Join(commitLines(changes, msg, stageAll), "\n")
+}
+
 func rp(name, branch string) repo.Repo {
 	return repo.Repo{Name: name, Branch: branch}
 }
@@ -22,7 +27,7 @@ var sampleChanges = []repo.GitChange{
 func TestCommitBodyTrackedOnly(t *testing.T) {
 	body := commitBody(rp("dialogic", "main"), sampleChanges, "fix timeline crash", false)
 
-	if !strings.Contains(body, "Commit 2 file(s) in dialogic on main:") {
+	if !strings.Contains(body, "Commit 2 file(s) in dialogic on main\n") {
 		t.Errorf("body should count only the 2 tracked files and name the branch:\n%s", body)
 	}
 	for _, want := range []string{"timeline.gd", "old.gd", "message: fix timeline crash"} {
@@ -51,23 +56,23 @@ func TestCommitBodyStageAll(t *testing.T) {
 	}
 }
 
-// TestCommitBodyCaps guards the reason the list is capped at all: a DialogScreen neither
-// scrolls nor clips, so an uncapped list would shove the chrome off the terminal.
-func TestCommitBodyCaps(t *testing.T) {
+// TestCommitBodyListsEvery guards against a cap coming back: the confirm pane scrolls,
+// so every file is listed.
+func TestCommitBodyListsEvery(t *testing.T) {
 	var many []repo.GitChange
 	for i := 0; i < 25; i++ {
 		many = append(many, repo.GitChange{Code: " M", Path: fmt.Sprintf("file%02d.gd", i)})
 	}
 	body := commitBody(rp("big", "main"), many, "sweeping change", false)
 
-	if n := strings.Count(body, ".gd"); n != maxCommitList {
-		t.Errorf("body lists %d files, want it capped at %d:\n%s", n, maxCommitList, body)
+	if n := strings.Count(body, ".gd"); n != len(many) {
+		t.Errorf("body lists %d files, want all %d:\n%s", n, len(many), body)
 	}
-	if !strings.Contains(body, "… and 15 more") {
-		t.Errorf("body should say how many it left out:\n%s", body)
+	if strings.Contains(body, "more") {
+		t.Errorf("body should not elide files:\n%s", body)
 	}
 	if !strings.Contains(body, "Commit 25 file(s)") {
-		t.Errorf("the count must still be the true total, not the shown subset:\n%s", body)
+		t.Errorf("missing true total:\n%s", body)
 	}
 }
 
@@ -77,7 +82,7 @@ func TestCommitBodyCleanNoBranch(t *testing.T) {
 	if strings.Contains(body, " on :") || strings.Contains(body, "on \n") {
 		t.Errorf("an unknown branch should be omitted, not printed empty:\n%s", body)
 	}
-	if !strings.Contains(body, "Commit 1 file(s) in addon:") {
+	if !strings.Contains(body, "Commit 1 file(s) in addon\n") {
 		t.Errorf("unexpected header:\n%s", body)
 	}
 }

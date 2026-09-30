@@ -109,7 +109,7 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, incl
 				if len(scopeTargets(scopes[i], root, includeRoot, sh)) == 0 {
 					return core.SetStatusAndLog("no " + noun + " to " + o.present)
 				}
-				return core.Push(newBatchConfirm(scopes, i, root, includeRoot, o, label, run))
+				return core.Push(newBatchConfirm(sh, scopes, i, root, includeRoot, o, label, run))
 			},
 		}
 	}
@@ -156,53 +156,43 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, incl
 // ---------- confirm + batch ----------
 
 // newBatchConfirm lists every repo the operation will touch, then runs the batch on confirm.
-func newBatchConfirm(scopes []Scope, i int, root RootOption, includeRoot bool, o Op, label string, run func(context.Context, string, repo.Reporter) error) *components.DialogScreen {
-	return components.CreateConfirmScreen(components.ConfirmSimple{
-		Crumb: "Confirm",
-		Render: func(sh *core.Shared) string {
-			return sh.Box(confirmBody(o, scopeTargets(scopes[i], root, includeRoot, sh)))
+func newBatchConfirm(sh *core.Shared, scopes []Scope, i int, root RootOption, includeRoot bool, o Op, label string, run func(context.Context, string, repo.Reporter) error) *components.ModularScreen {
+	return newListConfirm(sh, "Confirm",
+		func(sh *core.Shared) (string, []string) {
+			targets := scopeTargets(scopes[i], root, includeRoot, sh)
+			return confirmTitle(o, targets), confirmLines(o, targets)
 		},
-		OnYesLambda: func(sh *core.Shared) core.Action {
+		func(sh *core.Shared) core.Action {
 			return core.Replace(newBatchTask(scopes, i, root, includeRoot, o, label, run))
-		},
-	})
+		})
 }
 
-// maxConfirmList caps the repo list in the confirm body. A DialogScreen neither scrolls nor
-// clips, so an uncapped list would push the chrome off the terminal.
-const maxConfirmList = 12
-
-// confirmBody renders the confirm text: how many repos, then each with the divergence that
-// makes it worth acting on. A pure function of its inputs, so it's testable and owns the cap.
-func confirmBody(o Op, targets []repo.Repo) string {
+// confirmTitle is the confirm pane's legend: the operation and how many repos it touches.
+func confirmTitle(o Op, targets []repo.Repo) string {
 	head := fmt.Sprintf("%s %d repo(s)", titleWord(o.present), len(targets))
 	if o == opPull {
 		head += " — fast-forward only"
 	}
-	lines := []string{head + ":", ""}
+	return head
+}
 
-	shown := len(targets)
-	if shown > maxConfirmList {
-		shown = maxConfirmList
-	}
+// confirmLines is the confirm body: each repo with the divergence that makes it worth
+// acting on. Uncapped, since the pane scrolls. A pure function of its inputs, so it's
+// testable.
+func confirmLines(o Op, targets []repo.Repo) []string {
 	// Pad the name column so the annotations line up.
 	width := 0
-	for _, t := range targets[:shown] {
-		if len(t.Name) > width {
-			width = len(t.Name)
-		}
+	for _, t := range targets {
+		width = max(width, len(t.Name))
 	}
-	for _, t := range targets[:shown] {
-		lines = append(lines, fmt.Sprintf("  %-*s  %s", width, t.Name, syncNote(o, t.Sync)))
+	lines := make([]string, 0, len(targets)+2)
+	for _, t := range targets {
+		lines = append(lines, strings.TrimRight(fmt.Sprintf("  %-*s  %s", width, t.Name, syncNote(o, t.Sync)), " "))
 	}
-	if n := len(targets) - shown; n > 0 {
-		lines = append(lines, fmt.Sprintf("  … and %d more", n))
-	}
-
 	if o == opPull {
 		lines = append(lines, "", "A repo that has diverged will fail and be skipped; nothing else is touched.")
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // syncNote annotates a repo in the confirm with the count relevant to the operation.

@@ -216,7 +216,7 @@ func newCommitForm(r repo.Repo) (*components.FormScreen, *components.ToggleField
 			if len(commitable(changes, stageAll)) == 0 {
 				return core.SetStatusAndLog("nothing to commit in this mode")
 			}
-			confirm, err := newCommitConfirm(r, msg, stageAll)
+			confirm, err := newCommitConfirm(sh, r, msg, stageAll)
 			if err != nil {
 				return core.SeqErr(err, core.Async(f.Focus("message")))
 			}
@@ -400,47 +400,45 @@ func commitable(changes []repo.GitChange, stageAll bool) []repo.GitChange {
 
 // newCommitConfirm shows what the commit contains and which new files it leaves out. A
 // failed re-read is returned rather than showing a misleading empty list.
-func newCommitConfirm(r repo.Repo, msg string, stageAll bool) (*components.DialogScreen, error) {
+func newCommitConfirm(sh *core.Shared, r repo.Repo, msg string, stageAll bool) (*components.ModularScreen, error) {
 	changes, err := repo.GitChanges(r.Dir) // re-read: the tree may have moved since the form opened
 	if err != nil {
 		return nil, err
 	}
-	return components.CreateConfirmScreen(components.ConfirmSimple{
-		// No Crumb: it defaults to "Conf", so the trail reads "Git › Commit › Conf" rather
-		// than repeating "Commit" twice.
-		Text: commitBody(r, changes, msg, stageAll),
-		OnYes: core.Replace(Task("committing "+r.Name+"…", opCommit, r.Dir,
-			func(ctx context.Context, dir string, report repo.Reporter) error {
-				return repo.GitCommit(ctx, dir, msg, stageAll, report)
-			})),
-	}), nil
+	// Crumb "Conf" so the trail reads "Git › Commit › Conf" rather than repeating "Commit".
+	return newListConfirm(sh, "Conf",
+		func(*core.Shared) (string, []string) {
+			return commitTitle(r, changes, stageAll), commitLines(changes, msg, stageAll)
+		},
+		func(*core.Shared) core.Action {
+			return core.Replace(Task("committing "+r.Name+"…", opCommit, r.Dir,
+				func(ctx context.Context, dir string, report repo.Reporter) error {
+					return repo.GitCommit(ctx, dir, msg, stageAll, report)
+				}))
+		}), nil
 }
 
-// maxCommitList caps each confirm list; a DialogScreen neither scrolls nor clips.
-const maxCommitList = 10
-
-// commitBody renders the confirm text: the included files, then any untracked files the
-// mode leaves out.
-func commitBody(r repo.Repo, changes []repo.GitChange, msg string, stageAll bool) string {
-	included := commitable(changes, stageAll)
-
-	head := fmt.Sprintf("Commit %d file(s) in %s", len(included), r.Name)
+// commitTitle is the confirm pane's legend: how many files, in which repo and branch.
+func commitTitle(r repo.Repo, changes []repo.GitChange, stageAll bool) string {
+	head := fmt.Sprintf("Commit %d file(s) in %s", len(commitable(changes, stageAll)), r.Name)
 	if r.Branch != "" {
 		head += " on " + r.Branch
 	}
+	return head
+}
 
-	lines := []string{head + ":", ""}
-	lines = append(lines, fileLines(included, maxCommitList)...)
-
+// commitLines is the confirm body: the included files, then any untracked files the mode
+// leaves out, then the message. Uncapped, since the pane scrolls.
+func commitLines(changes []repo.GitChange, msg string, stageAll bool) []string {
+	lines := fileLines(commitable(changes, stageAll))
 	if !stageAll {
 		if untracked := excludedUntracked(changes); len(untracked) > 0 {
 			lines = append(lines, "", "Not included — new files, which \"-a\" does not stage.")
 			lines = append(lines, "Pick \"all, incl. new files\" to commit these too:", "")
-			lines = append(lines, fileLines(untracked, maxCommitList)...)
+			lines = append(lines, fileLines(untracked)...)
 		}
 	}
-
-	return strings.Join(append(lines, "", "message: "+msg), "\n")
+	return append(lines, "", "message: "+msg)
 }
 
 // excludedUntracked is what -a leaves behind: the untracked changes.
@@ -454,20 +452,11 @@ func excludedUntracked(changes []repo.GitChange) []repo.GitChange {
 	return out
 }
 
-// fileLines renders "  XY path" rows, capped at max with "… and N more"; max <= 0 renders
-// all.
-func fileLines(changes []repo.GitChange, max int) []string {
-	n := len(changes)
-	shown := n
-	if max > 0 && shown > max {
-		shown = max
-	}
-	lines := make([]string, 0, shown+1)
-	for _, c := range changes[:shown] {
+// fileLines renders "  XY path" rows, indented like the commit screen's file pane.
+func fileLines(changes []repo.GitChange) []string {
+	lines := make([]string, 0, len(changes))
+	for _, c := range changes {
 		lines = append(lines, fmt.Sprintf("  %s  %s", c.Code, c.Path))
-	}
-	if n > shown {
-		lines = append(lines, fmt.Sprintf("  … and %d more", n-shown))
 	}
 	return lines
 }

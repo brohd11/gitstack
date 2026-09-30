@@ -19,7 +19,7 @@ func TestConfirmBodyPull(t *testing.T) {
 		tgt("debug_draw", 0, 1),
 	})
 
-	if !strings.Contains(body, "Pull 3 repo(s) — fast-forward only:") {
+	if !strings.Contains(body, "Pull 3 repo(s) — fast-forward only") {
 		t.Errorf("missing header:\n%s", body)
 	}
 	for _, want := range []string{"dialogic", "2 behind origin", "phantom_camera", "up to date", "debug_draw", "1 behind origin"} {
@@ -37,7 +37,7 @@ func TestConfirmBodyPush(t *testing.T) {
 		tgt("dialogic", 3, 0),
 		tgt("phantom_camera", 0, 0),
 	})
-	if !strings.Contains(body, "Push 2 repo(s):") {
+	if !strings.Contains(body, "Push 2 repo(s)") {
 		t.Errorf("missing header:\n%s", body)
 	}
 	if !strings.Contains(body, "3 to push") || !strings.Contains(body, "nothing to push") {
@@ -51,7 +51,7 @@ func TestConfirmBodyPush(t *testing.T) {
 func TestConfirmBodyFetchNoAnnotations(t *testing.T) {
 	// Fetch acts on all repos regardless of state, so no per-repo count is meaningful.
 	body := confirmBody(opFetch, []repo.Repo{tgt("a", 5, 5), tgt("b", 0, 0)})
-	if !strings.Contains(body, "Fetch 2 repo(s):") {
+	if !strings.Contains(body, "Fetch 2 repo(s)") {
 		t.Errorf("missing header:\n%s", body)
 	}
 	if strings.Contains(body, "behind") || strings.Contains(body, "to push") {
@@ -59,21 +59,28 @@ func TestConfirmBodyFetchNoAnnotations(t *testing.T) {
 	}
 }
 
-func TestConfirmBodyCaps(t *testing.T) {
+// TestConfirmBodyListsEvery guards against a cap coming back: the confirm pane scrolls,
+// so every repo is listed.
+func TestConfirmBodyListsEvery(t *testing.T) {
 	var many []repo.Repo
 	for i := 0; i < 20; i++ {
 		many = append(many, tgt("repo"+string(rune('a'+i)), 0, 1))
 	}
 	body := confirmBody(opPull, many)
-	if n := strings.Count(body, "behind origin"); n != maxConfirmList {
-		t.Errorf("listed %d repos, want cap of %d:\n%s", n, maxConfirmList, body)
+	if n := strings.Count(body, "behind origin"); n != len(many) {
+		t.Errorf("listed %d repos, want all %d:\n%s", n, len(many), body)
 	}
-	if !strings.Contains(body, "… and 8 more") {
-		t.Errorf("body should say how many were omitted:\n%s", body)
+	if strings.Contains(body, "more") {
+		t.Errorf("body should not elide repos:\n%s", body)
 	}
 	if !strings.Contains(body, "Pull 20 repo(s)") {
-		t.Errorf("the count must be the true total, not the shown subset:\n%s", body)
+		t.Errorf("missing true total:\n%s", body)
 	}
+}
+
+// confirmBody joins the confirm's legend and lines, the way the pane shows them.
+func confirmBody(o Op, targets []repo.Repo) string {
+	return confirmTitle(o, targets) + "\n" + strings.Join(confirmLines(o, targets), "\n")
 }
 
 func TestScopeTargetsIncludeRoot(t *testing.T) {
