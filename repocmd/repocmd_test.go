@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,70 @@ func nestedRepoTree(t *testing.T, names ...string) string {
 		}
 	}
 	return base
+}
+
+func TestNestedDiscovery(t *testing.T) {
+	base := nestedRepoTree(t, "alpha", "alpha/child", "group/beta")
+	if out, err := exec.Command("git", "-C", base, "init", "-q", "-b", "main").CombinedOutput(); err != nil {
+		t.Fatalf("git init base: %v\n%s", err, out)
+	}
+	for _, tc := range []struct {
+		name         string
+		topLevelOnly bool
+		flags        []string
+		want         []string
+	}{
+		{"repoview default", true, nil, []string{"alpha", "group/beta"}},
+		{"repoview nested", true, []string{"--nested"}, []string{"alpha", "alpha/child", "group/beta"}},
+		{"explicit off", true, []string{"--nested=false"}, []string{"alpha", "group/beta"}},
+		{"include root", true, []string{"--include-root"}, []string{".", "alpha", "group/beta"}},
+		{"include root nested", true, []string{"--include-root", "--nested"}, []string{".", "alpha", "alpha/child", "group/beta"}},
+		{"legacy default", false, nil, []string{"alpha", "alpha/child", "group/beta"}},
+		{"depth limit", true, []string{"--nested", "--depth", "1"}, []string{"alpha"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := Options{AppName: "test", DefaultDepth: 5, TopLevelOnly: tc.topLevelOnly}
+			args := append([]string{"-C", base}, tc.flags...)
+			got := strings.Fields(runCmd(t, opts, args...))
+			for i := range tc.want {
+				tc.want[i] = filepath.FromSlash(tc.want[i])
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			// A shell command must run in exactly the same repos as listing mode.
+			output := runCmd(t, opts, append(args, "--", "pwd")...)
+			var dirs []string
+			for _, line := range strings.Split(output, "\n") {
+				if strings.HasPrefix(line, base) {
+					dirs = append(dirs, line)
+				}
+			}
+			var wantDirs []string
+			for _, rel := range tc.want {
+				wantDirs = append(wantDirs, filepath.Join(base, rel))
+			}
+			if !reflect.DeepEqual(dirs, wantDirs) {
+				t.Fatalf("command ran in %v, want %v", dirs, wantDirs)
+			}
+		})
+	}
+
+	// Filtering a parent out must not expose a dirty checkout inside it.
+	if err := os.WriteFile(filepath.Join(base, "alpha/child/dirty.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitignore := filepath.Join(base, "alpha/.gitignore")
+	if err := os.WriteFile(gitignore, []byte("*\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{AppName: "test", DefaultDepth: 5, TopLevelOnly: true}
+	if got := runCmd(t, opts, "-C", base, "--dirty"); got != "" {
+		t.Fatalf("dirty filtering must happen after discovery, got %q", got)
+	}
+	if got := strings.TrimSpace(runCmd(t, opts, "-C", base, "--dirty", "--nested")); got != filepath.Join("alpha", "child") {
+		t.Fatalf("nested dirty discovery got %q, want alpha/child", got)
+	}
 }
 
 // runCmd drives the command the way cobra will in production -- through argument

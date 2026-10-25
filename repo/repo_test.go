@@ -251,6 +251,25 @@ func TestScan(t *testing.T) {
 	if r := byName["beta"]; r.Dir != b {
 		t.Errorf("beta.Dir = %q, want absolute %q", r.Dir, b)
 	}
+
+	child := filepath.Join(a, "child")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initRepo(t, child, "https://github.com/owner/child.git", "main")
+	for _, skipNested := range []bool{false, true} {
+		repos, err := Scan(base, 5, ScanOptions{SkipNested: skipNested})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 3
+		if skipNested {
+			want = 2
+		}
+		if len(repos) != want {
+			t.Fatalf("Scan(SkipNested=%v) found %d repos, want %d", skipNested, len(repos), want)
+		}
+	}
 }
 
 func TestDescribeRoot(t *testing.T) {

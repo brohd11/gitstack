@@ -25,6 +25,10 @@ type Options struct {
 	// DefaultDepth is the --depth default. repoview scans 1 level, gdaddon 5.
 	DefaultDepth int
 
+	// TopLevelOnly defaults discovery to the first checkout on each directory branch.
+	// --nested restores recursive discovery. False preserves the recursive default.
+	TopLevelOnly bool
+
 	// DepthDefText overrides the default shown in --help (an app whose ResolveDepth reads an
 	// environment variable says so here).
 	DepthDefText string
@@ -41,6 +45,7 @@ func New(opts Options) *cobra.Command {
 		dirty       bool
 		depthFlag   int
 		includeRoot bool
+		nested      bool
 	)
 
 	app := opts.AppName
@@ -50,9 +55,12 @@ func New(opts Options) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "repos [flags] -- <command...>",
-		Short: "Run a shell command in every git repo nested under a directory",
-		Long: fmt.Sprintf(`Walk a directory tree, find every nested git repo (the top-level repo is
+		Short: "Run a shell command in git repos under a directory",
+		Long: fmt.Sprintf(`Walk a directory tree, find git repos (the scanned directory itself is
 excluded unless --include-root), and run a shell command inside each one.
+
+With --nested=false, stop descending once a repo is found beneath the scanned directory.
+Use --nested to also gather repos inside those repos, within the same depth limit.
 
 The command is joined and run via "sh -c", so pipes, &&, and redirects work — quote
 them as a single argument so your own shell doesn't consume them first:
@@ -81,6 +89,7 @@ output; use --raw to live-stream output instead.`, app),
 				dirty:       dirty,
 				depth:       depth,
 				includeRoot: includeRoot,
+				skipNested:  !nested,
 			})
 		},
 	}
@@ -93,6 +102,7 @@ output; use --raw to live-stream output instead.`, app),
 	cmd.Flags().BoolVar(&dirty, "dirty", false, "only repos with uncommitted changes")
 	cmd.Flags().IntVar(&depthFlag, "depth", opts.DefaultDepth, "max directory depth to search")
 	cmd.Flags().BoolVar(&includeRoot, "include-root", false, "also run in the top-level repo (the scanned dir itself)")
+	cmd.Flags().BoolVar(&nested, "nested", !opts.TopLevelOnly, "also gather repos nested inside discovered repos")
 	if opts.DepthDefText != "" {
 		cmd.Flags().Lookup("depth").DefValue = opts.DepthDefText
 	}
@@ -105,6 +115,7 @@ type runConfig struct {
 	dirty       bool
 	depth       int
 	includeRoot bool
+	skipNested  bool
 }
 
 func run(cmd *cobra.Command, args []string, cfg runConfig) error {
@@ -124,7 +135,7 @@ func run(cmd *cobra.Command, args []string, cfg runConfig) error {
 		return fmt.Errorf("could not resolve absolute path for %s: %w", base, err)
 	}
 
-	repos, err := repo.FindGitRepos(base, cfg.depth)
+	repos, err := repo.FindGitRepos(base, cfg.depth, repo.ScanOptions{SkipNested: cfg.skipNested})
 	if err != nil {
 		return err
 	}

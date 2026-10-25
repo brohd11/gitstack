@@ -61,10 +61,18 @@ func Describe(name, dir string) Repo {
 	}
 }
 
-// Scan finds every checkout under base (to maxDepth, base excluded) and describes each.
+// ScanOptions controls traversal beneath discovered checkouts.
+type ScanOptions struct {
+	// SkipNested stops descending once a checkout beneath base is found. The base
+	// itself is always excluded and never prevents discovery beneath it.
+	SkipNested bool
+}
+
+// Scan finds checkouts under base (to maxDepth, base excluded) and describes each.
 // Name is the base-relative path, Dir absolute; results are in walk order.
-func Scan(base string, maxDepth int) ([]Repo, error) {
-	rels, err := FindGitRepos(base, maxDepth)
+// Without options it includes nested checkouts, as FindGitRepos does.
+func Scan(base string, maxDepth int, opts ...ScanOptions) ([]Repo, error) {
+	rels, err := FindGitRepos(base, maxDepth, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +197,13 @@ func FetchAll(ctx context.Context, repos []Repo) []FetchResult {
 
 // FindGitRepos returns the base-relative paths of checkouts under base (base excluded) to
 // maxDepth levels, identified by a `.git` entry (directory or submodule file). It descends
-// into repos for nested submodules, never into `.git`, and skips unreadable entries.
-func FindGitRepos(base string, maxDepth int) ([]string, error) {
+// into repos for nested submodules unless SkipNested is set, never into `.git`, and
+// skips unreadable entries. At most one ScanOptions value should be supplied.
+func FindGitRepos(base string, maxDepth int, opts ...ScanOptions) ([]string, error) {
+	var opt ScanOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	var repos []string
 	err := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -211,6 +224,9 @@ func FindGitRepos(base string, maxDepth int) ([]string, error) {
 		if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
 			if rel, err := filepath.Rel(base, path); err == nil {
 				repos = append(repos, rel)
+			}
+			if opt.SkipNested {
+				return filepath.SkipDir
 			}
 		}
 		return nil
