@@ -2,11 +2,17 @@ package repoui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // commitBody joins the commit confirm's legend and lines, the way the pane shows them.
@@ -101,6 +107,68 @@ func TestCommitFormMessageRoundTrips(t *testing.T) {
 	}
 	if got := f.Value("message"); got != "fix timeline crash" {
 		t.Errorf("a typed commit message should reach OnSubmit, Value = %q", got)
+	}
+}
+
+func TestCommitScreenBoxMargins(t *testing.T) {
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init", "-q", "-b", "main").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "new.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, message string }{
+		{"short", "fix layout"},
+		{"long", strings.Repeat("commit message ", 100)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sh := core.NewShared(nil)
+			screen := newCommitScreen(repo.Repo{Name: "test", Dir: dir, Branch: "main"})
+			var model tea.Model = core.NewRouter(sh, []core.TabEntry{{
+				Title: "Git", New: func(*core.Shared) core.Screen { return screen },
+			}})
+			model.Init() // Initialize the embedded form; timer commands need not run.
+			screen.Update(sh, tea.PasteMsg{Content: tc.message})
+			shortFilesY := -1
+			for _, width := range []int{80, 81, 120, 80} {
+				model, _ = model.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+				filesY := -1
+				for _, focus := range []int{0, 1} {
+					screen.FocusSlot(focus)
+					view := ansi.Strip(screen.View(sh))
+					rows := strings.Split(view, "\n")
+					_, y, _, _, ok := screen.SlotRect(1)
+					if !ok || y < 1 || y >= len(rows) {
+						t.Fatalf("invalid file-list row %d in %d rows", y, len(rows))
+					}
+					if filesY >= 0 && y != filesY {
+						t.Errorf("width=%d: switching focus moved file list from %d to %d", width, filesY, y)
+					}
+					filesY = y
+					if tc.name == "short" {
+						if shortFilesY >= 0 && y != shortFilesY {
+							t.Errorf("width=%d: resizing a short form moved file list from %d to %d", width, shortFilesY, y)
+						}
+						shortFilesY = y
+					}
+					for i, row := range rows[:y] {
+						if got := lipgloss.Width(row); got != width {
+							t.Errorf("width=%d/focus=%d: form row %d occupies %d columns", width, focus, i, got)
+						}
+					}
+					if want := "  ╭" + strings.Repeat("─", width-6) + "╮  "; rows[0] != want {
+						t.Errorf("width=%d: form must have equal two-column margins: %q", width, rows[0])
+					}
+					if want := "  ╰" + strings.Repeat("─", width-6) + "╯  "; rows[y-1] != want {
+						t.Errorf("width=%d: bottom border must sit directly above file list: %q", width, rows[y-1])
+					}
+					if !strings.Contains(rows[y], commitFilesTitle) || !strings.Contains(view, "new.go") {
+						t.Errorf("file list missing from modular view:\n%s", view)
+					}
+				}
+			}
+		})
 	}
 }
 
