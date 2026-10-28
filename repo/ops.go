@@ -25,13 +25,17 @@ func GitStatus(ctx context.Context, dir string, report Reporter) error {
 // GitPull fast-forwards to the upstream. --ff-only makes a diverged branch abort unchanged
 // instead of starting a merge (conflicts, an editor) inside a TUI.
 func GitPull(ctx context.Context, dir string, report Reporter) error {
-	return GitStream(ctx, dir, report, "pull", "--ff-only")
+	return gitOperation(ctx, dir, "pull", "", report, func() error {
+		return GitStream(ctx, dir, report, "pull", "--ff-only")
+	})
 }
 
 // GitPush pushes the current branch; a branch without an upstream fails, leaving that
 // decision to the user.
 func GitPush(ctx context.Context, dir string, report Reporter) error {
-	return GitStream(ctx, dir, report, "push")
+	return gitOperation(ctx, dir, "push", "", report, func() error {
+		return GitStream(ctx, dir, report, "push")
+	})
 }
 
 // GitCommit commits with message. stageAll chooses what "all" means:
@@ -40,12 +44,14 @@ func GitPush(ctx context.Context, dir string, report Reporter) error {
 //
 // The message is an exec argument, so it needs no escaping.
 func GitCommit(ctx context.Context, dir, message string, stageAll bool, report Reporter) error {
-	if stageAll {
-		report("%s", "$ git add -A")
-		if err := GitStream(ctx, dir, report, "add", "-A"); err != nil {
-			return err
+	return gitOperation(ctx, dir, "commit", "", report, func() error {
+		if stageAll {
+			report("%s", "$ git add -A")
+			if err := GitStream(ctx, dir, report, "add", "-A"); err != nil {
+				return err
+			}
 		}
-	}
-	report("%s", "$ git commit -a -m "+strconv.Quote(message))
-	return GitStream(ctx, dir, report, "commit", "-a", "-m", message)
+		report("%s", "$ git commit -a -m "+strconv.Quote(message))
+		return GitStream(ctx, dir, report, "commit", "-a", "-m", message)
+	})
 }

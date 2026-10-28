@@ -20,12 +20,16 @@ type FetchDoneMsg struct{ Results []repo.FetchResult }
 
 // FetchAllCmd fetches the repos gather returns concurrently (repo.FetchAll, bounded by
 // FetchTimeout) off the UI thread, then broadcasts FetchDoneMsg. gather runs in the
-// goroutine, so it may do disk work but must not touch Shared.
-func FetchAllCmd(gather func() []repo.Repo) tea.Cmd {
+// goroutine, so it may do disk work but must not touch Shared. An optional app
+// name enables that app's Git hooks, just as GitHookApp does for task screens.
+func FetchAllCmd(gather func() []repo.Repo, app ...string) tea.Cmd {
 	return func() tea.Msg {
 		repos := gather()
 		ctx, cancel := context.WithTimeout(context.Background(), FetchTimeout)
 		defer cancel()
+		if len(app) > 0 {
+			ctx = repo.WithHookApp(ctx, app[0])
+		}
 		return core.PropagateAll(FetchDoneMsg{Results: repo.FetchAll(ctx, repos)})
 	}
 }
@@ -37,6 +41,9 @@ func LogFetchResults(sh *core.Shared, results []repo.FetchResult, noun, emptyMsg
 		return core.SetStatus(emptyMsg)
 	}
 	for _, r := range results {
+		for _, line := range r.Output {
+			sh.Log("[" + r.Name + "] " + line)
+		}
 		sh.Log(repo.FetchLine(r))
 	}
 	line, failed := repo.FetchSummary(results, noun)

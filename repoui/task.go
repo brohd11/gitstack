@@ -1,11 +1,12 @@
 // Package repoui holds domain-neutral git screens on bubblestack and repo: the streaming
 // task, the per-repo Git menu and the batch menu. Consumers pass repo.Repo values (and
 // scopes) and react to its refresh broadcasts. Pull is fast-forward only; anything needing
-// a decision fails with git's message and changes nothing.
+// a decision fails with git's message. User commands can run around each Git action.
 package repoui
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/brohd11/bubblestack/components"
@@ -39,16 +40,27 @@ var (
 
 // Task runs one git operation on one repo, streaming into the log, and stays on screen
 // until esc so git's output can be read. o.past is the success status (empty for
-// report-only operations), o.failure the failure one. Success broadcasts RepoRefreshMsg.
+// report-only operations), o.failure the failure one. Completion broadcasts RepoRefreshMsg,
+// including failures: hooks may change files before an action fails.
 func Task(label string, o Op, dir string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
 	run := func(ctx context.Context, sh *core.Shared, report func(string, ...any), done chan<- core.TaskEvent) {
-		done <- core.TaskEvent{Done: true, Err: op(ctx, dir, report)}
+		err := op(hookContext(ctx, sh), dir, report)
+		if err != nil {
+			report("%v", err)
+		}
+		done <- core.TaskEvent{Done: true, Err: err}
 	}
 	onDone := func(sh *core.Shared, ev core.TaskEvent) core.Action {
 		if ev.Err != nil {
-			// git's own words are already in the log above; the status line only has to say
-			// where to go next. Nothing was changed — --ff-only and a failed push guarantee it.
-			return core.SetStatusAndLog(o.failure + " — resolve it in a terminal (t)")
+			status := o.failure + " — resolve it in a terminal (t)"
+			var hookErr *repo.HookError
+			if errors.As(ev.Err, &hookErr) {
+				status = hookErr.Error()
+			}
+			return core.Seq(
+				core.SetStatusAndLog(status),
+				core.PropagateAll(RepoRefreshMsg{Dir: dir}),
+			)
 		}
 		if o.past == "" {
 			return core.PropagateAll(RepoRefreshMsg{Dir: dir})

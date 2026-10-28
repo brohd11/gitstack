@@ -198,19 +198,25 @@ func splitTagPrefix(t string) (prefix, num string) {
 
 // GitTag creates a lightweight tag on HEAD; an existing name fails.
 func GitTag(ctx context.Context, dir, name string, report Reporter) error {
-	report("%s", "$ git tag "+name)
-	return GitStream(ctx, dir, report, "tag", name)
+	return gitOperation(ctx, dir, "tag", name, report, func() error {
+		report("%s", "$ git tag "+name)
+		return GitStream(ctx, dir, report, "tag", name)
+	})
 }
 
 // GitPushTag pushes one tag to origin; git rejects one origin already has.
 func GitPushTag(ctx context.Context, dir, name string, report Reporter) error {
-	report("%s", "$ git push origin "+name)
-	return GitStream(ctx, dir, report, "push", "origin", name)
+	return gitOperation(ctx, dir, "push", name, report, func() error {
+		report("%s", "$ git push origin "+name)
+		return GitStream(ctx, dir, report, "push", "origin", name)
+	})
 }
 
 // GitDeleteTag deletes a local tag. A tag that was never pushed is gone for
 // good, which is why the UI confirms first; git itself has no undo here.
 func GitDeleteTag(ctx context.Context, dir, name string, report Reporter) error {
-	report("%s", "$ git tag -d "+name)
-	return GitStream(ctx, dir, report, "tag", "-d", name)
+	return gitOperation(ctx, dir, "delete_tag", name, report, func() error {
+		report("%s", "$ git tag -d "+name)
+		return GitStream(ctx, dir, report, "tag", "-d", name)
+	})
 }

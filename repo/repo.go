@@ -159,15 +159,22 @@ func GitSyncStatus(dir string) GitSync {
 // network call, so it takes ctx and returns errors; credential prompts fail fast
 // (GitEnv).
 func GitFetch(ctx context.Context, dir string) error {
-	_, err := runGitCtx(ctx, dir, "fetch")
-	return err
+	return GitFetchReport(ctx, dir, func(string, ...any) {})
+}
+
+// GitFetchReport is GitFetch with streamed Git and hook output.
+func GitFetchReport(ctx context.Context, dir string, report Reporter) error {
+	return gitOperation(ctx, dir, "fetch", "", report, func() error {
+		return GitStream(ctx, dir, report, "fetch")
+	})
 }
 
 // FetchResult is one repo's FetchAll outcome: the error and the divergence read afterwards.
 type FetchResult struct {
-	Name string
-	Err  error
-	Sync GitSync
+	Name   string
+	Err    error
+	Sync   GitSync
+	Output []string // Git and hook output captured by FetchAll for the caller's log
 }
 
 // FetchAll fetches every repo concurrently (capped at maxConcurrentFetch) and reads each
@@ -183,7 +190,10 @@ func FetchAll(ctx context.Context, repos []Repo) []FetchResult {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			res := FetchResult{Name: name, Err: GitFetch(ctx, dir)}
+			res := FetchResult{Name: name}
+			res.Err = GitFetchReport(ctx, dir, func(format string, args ...any) {
+				res.Output = append(res.Output, fmt.Sprintf(format, args...))
+			})
 			res.Sync = GitSyncStatus(dir)
 			mu.Lock()
 			out = append(out, res)

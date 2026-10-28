@@ -115,9 +115,7 @@ func menuItems(scopes []Scope, i int, targets []repo.Repo, root RootOption, incl
 	}
 
 	items := []list.Item{
-		op(opFetch, "⟳ Fetch all", func(ctx context.Context, dir string, _ repo.Reporter) error {
-			return repo.GitFetch(ctx, dir)
-		}, fmt.Sprintf("update remote refs for %d %s", n, noun)),
+		op(opFetch, "⟳ Fetch all", repo.GitFetchReport, fmt.Sprintf("update remote refs for %d %s", n, noun)),
 		op(opPull, "⇩ Pull all", repo.GitPull,
 			fmt.Sprintf("fast-forward — %d of %d %s behind origin", behind, n, noun)),
 		op(opPush, "⇧ Push all", repo.GitPush,
@@ -219,6 +217,7 @@ func syncNote(o Op, s repo.GitSync) string {
 func newBatchTask(scopes []Scope, i int, root RootOption, includeRoot bool, o Op, label string, op func(context.Context, string, repo.Reporter) error) *components.TaskScreen {
 	var done, failed int
 	run := func(ctx context.Context, sh *core.Shared, report func(string, ...any), doneCh chan<- core.TaskEvent) {
+		ctx = hookContext(ctx, sh)
 		targets := scopeTargets(scopes[i], root, includeRoot, sh)
 		for j, t := range targets {
 			if ctx.Err() != nil {

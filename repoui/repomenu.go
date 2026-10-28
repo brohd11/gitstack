@@ -17,8 +17,8 @@ import (
 )
 
 // The per-repo Git menu: status, fetch, pull, commit and push without leaving the app.
-// Each operation succeeds on the plain path or fails having changed nothing; divergence,
-// conflicts and rebases belong in a terminal.
+// Divergence, conflicts and rebases belong in a terminal. User hooks can run
+// before or after each action; the task reports which phase failed.
 
 // stageOptions is the commit form's staging toggle, in index order. The default (index 0) is
 // the conservative one — see repo.GitCommit for why the distinction is load-bearing.
@@ -72,7 +72,7 @@ func repoItems(r repo.Repo) []list.Item {
 			Desc: "update this repo's remote refs (the whole project: \"f\" on the list)",
 			Pick: task("fetching "+name+"…", opFetch, func(ctx context.Context, dir string, report repo.Reporter) error {
 				report("fetching %s…", name)
-				return repo.GitFetch(ctx, dir)
+				return repo.GitFetchReport(ctx, dir, report)
 			}),
 		},
 		components.Item{

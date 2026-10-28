@@ -61,6 +61,8 @@ func TestTaskRefreshRouting(t *testing.T) {
 		{"tag", opTag, nil, false},
 		{"delete", opDelete, nil, false},
 		{"failure", opPull, errors.New("failed"), false},
+		{"pre hook failure", opTag, &repo.HookError{Event: "pre_tag", Command: "check", Err: errors.New("mismatch")}, false},
+		{"post hook failure", opTag, &repo.HookError{Event: "post_tag", Command: "notify", Completed: true, Err: errors.New("offline")}, false},
 		{"batch", opFetch, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,11 +79,10 @@ func TestTaskRefreshRouting(t *testing.T) {
 			}
 			_, act := task.Update(sh, core.TaskEvent{Done: true, Err: tc.err})
 			router.Update(act)
-			if tc.err != nil {
-				if len(recorder.messages) != 0 {
-					t.Fatal("failed task unexpectedly refreshed")
+			if hookErr, ok := tc.err.(*repo.HookError); ok {
+				if view := sh.Chrome.Status.View(); !strings.Contains(view, hookErr.Error()) {
+					t.Fatalf("hook failure status lost completion details: %q", view)
 				}
-				return
 			}
 			if len(recorder.messages) != 1 {
 				t.Fatalf("messages = %#v", recorder.messages)
