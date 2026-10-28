@@ -136,10 +136,10 @@ func isDigits(s string) bool {
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
-// NextTag suggests the tag after the highest strict three-part version (optional "v")
-// across local and remote, bumping the patch: "v2.3.9" → "v2.3.10". "" when neither has
-// one.
-func NextTag(local, remote []string) string {
+// LatestVersionTag returns the highest strict three-part version (optional "v")
+// across local and remote, or "" when neither has one. Equal versions prefer the
+// first occurrence, preserving the spelling used by NextTag.
+func LatestVersionTag(local, remote []string) string {
 	best := ""
 	for _, tags := range [][]string{local, remote} {
 		for _, t := range tags {
@@ -148,6 +148,14 @@ func NextTag(local, remote []string) string {
 			}
 		}
 	}
+	return best
+}
+
+// NextTag suggests the tag after the highest strict three-part version (optional "v")
+// across local and remote, bumping the patch: "v2.3.9" → "v2.3.10". "" when neither has
+// one.
+func NextTag(local, remote []string) string {
+	best := LatestVersionTag(local, remote)
 	if best == "" {
 		return ""
 	}

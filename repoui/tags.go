@@ -150,12 +150,17 @@ func TagsScreen(sh *core.Shared, r repo.Repo) *components.ModularScreen {
 // newTagForm is the one-field create form, prefilled with repo.NextTag from the last
 // remote load and the local tags.
 func newTagForm(r repo.Repo, remote *tagListPanel) *components.FormScreen {
+	local := repo.LocalTags(r.Dir)
+	current := repo.LatestVersionTag(local, remote.Tags())
+	if current == "" {
+		current = "(no version tag)"
+	}
 	form := components.NewForm(components.FormOpts{
 		Crumb: "New Tag",
 		Fields: []components.FormField{
 			components.NewHeading("Tag the current commit in " + r.Name),
 			components.NewSpacer(),
-			components.NewTextField("name", "Tag: ", "1.0.0"),
+			components.NewTextField("name", current+" → ", "1.0.0"),
 		},
 		Focus: "name",
 		Help: []key.Binding{
@@ -183,7 +188,7 @@ func newTagForm(r repo.Repo, remote *tagListPanel) *components.FormScreen {
 				}))
 		},
 	})
-	if next := repo.NextTag(repo.LocalTags(r.Dir), remote.Tags()); next != "" {
+	if next := repo.NextTag(local, remote.Tags()); next != "" {
 		form.SetValue("name", next)
 	}
 	return form

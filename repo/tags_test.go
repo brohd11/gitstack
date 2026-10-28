@@ -109,3 +109,21 @@ func TestNextTag(t *testing.T) {
 		}
 	}
 }
+
+func TestLatestVersionTag(t *testing.T) {
+	for _, tc := range []struct {
+		local, remote []string
+		want          string
+	}{
+		{nil, nil, ""},
+		{[]string{"nightly", "1.0", "1.0.0-rc.1"}, nil, ""},
+		{[]string{"v1.2.3"}, []string{"v1.10.0"}, "v1.10.0"},
+		{[]string{"2.0.0"}, []string{"v1.9.9"}, "2.0.0"},
+		{[]string{"1.0.0"}, []string{"v1.0.0"}, "1.0.0"},
+		{[]string{"v1.0.0", "1.0.0"}, nil, "v1.0.0"},
+	} {
+		if got := LatestVersionTag(tc.local, tc.remote); got != tc.want {
+			t.Errorf("LatestVersionTag(%v, %v) = %q, want %q", tc.local, tc.remote, got, tc.want)
+		}
+	}
+}
