@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
 	"github.com/brohd11/gitstack/repo"
@@ -72,13 +74,28 @@ func TestTaskRefreshRouting(t *testing.T) {
 			router := core.NewRouter(sh, []core.TabEntry{{Title: "test", New: func(*core.Shared) core.Screen {
 				return components.NewPicker(nil, components.PickerOpts{})
 			}}})
-			op := func(context.Context, string, repo.Reporter) error { return nil }
+			op := func(context.Context, string, repo.Reporter) error { return tc.err }
 			task := Task("test", tc.op, dir, op)
 			if tc.batch {
-				task = newBatchTask(nil, 0, RootOption{}, false, tc.op, "test", op)
+				scopes := []Scope{{Repos: func(*core.Shared) []repo.Repo { return nil }}}
+				task = newBatchTask(scopes, 0, RootOption{}, false, tc.op, "test", op)
 			}
-			_, act := task.Update(sh, core.TaskEvent{Done: true, Err: tc.err})
-			router.Update(act)
+			t.Cleanup(task.Dispose)
+			// Skip the spinner and drive the owned event stream through completion.
+			cmd := task.Init(sh)().(tea.BatchMsg)[1]
+			for cmd != nil {
+				result := make(chan tea.Msg, 1)
+				go func() { result <- cmd() }()
+				var msg tea.Msg
+				select {
+				case msg = <-result:
+				case <-time.After(3 * time.Second):
+					t.Fatal("task event did not arrive")
+				}
+				_, act := task.Update(sh, msg)
+				router.Update(core.Action{Msg: act.Msg})
+				cmd = act.Cmd
+			}
 			if hookErr, ok := tc.err.(*repo.HookError); ok {
 				if view := sh.Chrome.Status.View(); !strings.Contains(view, hookErr.Error()) {
 					t.Fatalf("hook failure status lost completion details: %q", view)
