@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 )
 
@@ -112,7 +111,7 @@ func DiffStats(dir string) (map[string]DiffStat, error) {
 	if dir == "" {
 		return nil, nil
 	}
-	out, err := gitCapture(dir, "-c", "core.quotepath=false", "diff", "--numstat", diffAgainst, "--")
+	out, err := gitCapture(dir, "diff", "--numstat", "-z", "--find-renames", diffAgainst, "--")
 	if err != nil {
 		if !hasHEAD(dir) {
 			return nil, nil // no commits: every file is new, and new files have no numstat
@@ -120,26 +119,7 @@ func DiffStats(dir string) (map[string]DiffStat, error) {
 		return nil, err
 	}
 
-	stats := make(map[string]DiffStat)
-	for _, line := range strings.Split(out, "\n") {
-		// "added\tdeleted\tpath" ("-\t-\t" for binary); a rename's path is kept verbatim, as
-		// GitChanges does.
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		if parts[0] == "-" {
-			stats[parts[2]] = DiffStat{Binary: true}
-			continue
-		}
-		added, err1 := strconv.Atoi(parts[0])
-		deleted, err2 := strconv.Atoi(parts[1])
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		stats[parts[2]] = DiffStat{Added: added, Deleted: deleted}
-	}
-	return stats, nil
+	return parseCommitStats(out)
 }
 
 // gitCapture runs a read-only git command and returns stdout untrimmed (whitespace is

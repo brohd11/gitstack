@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/brohd11/bubblestack/components"
 	"github.com/brohd11/bubblestack/core"
@@ -300,31 +301,36 @@ func (p *commitPanel) refreshFiles() {
 	p.files.SetLines(lines)
 }
 
-// Keep raw paths in the repository snapshot; escape control characters only at
-// the display boundary so a filename cannot inject rows into the file pane.
+// Keep raw paths through statistics lookup; escape only when rendering rows.
 func commitPreviewRows(files []repo.CommitFile) ([]repo.GitChange, map[string]*repo.DiffStat) {
 	changes := make([]repo.GitChange, 0, len(files))
 	stats := make(map[string]*repo.DiffStat, len(files))
-	displayPath := func(path string) string {
-		if strings.ContainsAny(path, "\t\r\n\x1b") {
-			return strconv.Quote(path)
-		}
-		return path
-	}
 	for _, file := range files {
 		f := file.Status
 		code := strings.ReplaceAll(string([]byte{f.Index, f.Worktree}), ".", " ")
 		if f.Untracked {
 			code = "??"
 		}
-		path := displayPath(f.Path)
-		if f.OriginalPath != "" {
-			path = displayPath(f.OriginalPath) + " -> " + path
-		}
-		changes = append(changes, repo.GitChange{Code: code, Path: path})
-		stats[path] = file.Stat
+		changes = append(changes, repo.GitChange{Code: code, Path: f.Path, OriginalPath: f.OriginalPath})
+		stats[f.Path] = file.Stat
 	}
 	return changes, stats
+}
+
+// A label is never passed back to Git. Control characters are quoted so names
+// cannot inject terminal commands or extra rows into pickers and confirmations.
+func changeLabel(c repo.GitChange) string {
+	displayPath := func(path string) string {
+		if strings.ContainsFunc(path, unicode.IsControl) {
+			return strconv.Quote(path)
+		}
+		return path
+	}
+	path := displayPath(c.Path)
+	if c.OriginalPath != "" {
+		path = displayPath(c.OriginalPath) + " -> " + path
+	}
+	return path
 }
 
 // commitPaneLines is the file pane's body: the files the commit contains, then (under -a)
@@ -362,7 +368,7 @@ func commitPaneLines(changes []repo.GitChange, stageAll bool, stats map[string]*
 	rows := func(files []repo.GitChange) []string {
 		lines := make([]string, 0, len(files))
 		for _, c := range files {
-			lines = append(lines, fmt.Sprintf("  %s  %-*s  %s", c.Code, width, labels[c.Path], c.Path))
+			lines = append(lines, fmt.Sprintf("  %s  %-*s  %s", c.Code, width, labels[c.Path], changeLabel(c)))
 		}
 		return lines
 	}
@@ -456,7 +462,7 @@ func excludedUntracked(changes []repo.GitChange) []repo.GitChange {
 func fileLines(changes []repo.GitChange) []string {
 	lines := make([]string, 0, len(changes))
 	for _, c := range changes {
-		lines = append(lines, fmt.Sprintf("  %s  %s", c.Code, c.Path))
+		lines = append(lines, fmt.Sprintf("  %s  %s", c.Code, changeLabel(c)))
 	}
 	return lines
 }

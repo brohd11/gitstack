@@ -247,11 +247,13 @@ func FindGitRepos(base string, maxDepth int, opts ...ScanOptions) ([]string, err
 	return repos, nil
 }
 
-// GitChange is one `git status --porcelain` entry: the two-letter code and repo-relative
-// path. "??" is untracked, which `commit -a` does not include.
+// GitChange is one status entry: the two-letter code and raw repo-relative path.
+// Path is the destination of a rename/copy; OriginalPath is its source, if any.
+// "??" is untracked, which `commit -a` does not include.
 type GitChange struct {
-	Code string
-	Path string
+	Code         string
+	Path         string
+	OriginalPath string
 }
 
 // Untracked reports whether the change is a file git isn't tracking yet.
@@ -259,7 +261,7 @@ func (c GitChange) Untracked() bool { return c.Code == "??" }
 
 // GitChanges lists everything `git status --porcelain` reports (empty for a clean tree or
 // non-checkout). -uall names every untracked file rather than collapsing a new directory,
-// since diffs and commit confirms act per file; quotepath=false keeps non-ASCII readable.
+// since diffs and commit confirms act per file. Paths are unquoted and unchanged.
 func GitChanges(dir string) ([]GitChange, error) {
 	if dir == "" {
 		return nil, nil
@@ -267,20 +269,19 @@ func GitChanges(dir string) ([]GitChange, error) {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return nil, nil
 	}
-	out, err := gitCmd(context.Background(), dir, "-c", "core.quotepath=false", "status", "--porcelain", "-uall").Output()
+	status, err := readStatusRecords(context.Background(), dir, "--ignored=no")
 	if err != nil {
 		return nil, fmt.Errorf("could not read git status in %s: %w", dir, err)
 	}
 
 	var changes []GitChange
-	for _, line := range strings.Split(string(out), "\n") {
-		// "XY path": the path starts at column 3; a rename's "old -> new" is kept whole.
-		if len(line) < 4 {
-			continue
+	for _, f := range status.files {
+		code := strings.ReplaceAll(string([]byte{f.Index, f.Worktree}), ".", " ")
+		if f.Untracked {
+			code = "??"
 		}
 		changes = append(changes, GitChange{
-			Code: line[:2],
-			Path: strings.TrimSpace(line[3:]),
+			Code: code, Path: f.Path, OriginalPath: f.OriginalPath,
 		})
 	}
 	return changes, nil

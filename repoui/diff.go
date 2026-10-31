@@ -200,11 +200,12 @@ func diffItems(r repo.Repo) []list.Item {
 	}
 
 	for _, c := range changes {
+		label := changeLabel(c)
 		items = append(items, components.Item{
-			Name: c.Code + "  " + c.Path,
+			Name: c.Code + "  " + label,
 			Desc: fileDesc(c, stats[c.Path], statsFailed),
 			Pick: func(*core.Shared) core.Action {
-				return core.Push(NewDiffScreen(c.Path, r.Dir, c.Path, c.Untracked()))
+				return core.Push(NewDiffScreen(label, r.Dir, c.Path, c.Untracked()))
 			},
 		})
 	}

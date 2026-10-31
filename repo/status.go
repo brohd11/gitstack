@@ -50,19 +50,44 @@ func ReadWorktreeStatus(ctx context.Context, dir string) (WorktreeStatus, error)
 	if err != nil || root == "" {
 		return WorktreeStatus{}, err
 	}
-	out, err := gitCmd(ctx, root, "--no-optional-locks",
-		"status", "--porcelain=v2", "-z", "--untracked-files=all",
-		"--ignored=matching", "--ignore-submodules=none").Output()
+	records, err := readStatusRecords(ctx, root, "--ignored=matching", "--ignore-submodules=none")
 	if err != nil {
-		return WorktreeStatus{}, fmt.Errorf("read status: %w", err)
+		return WorktreeStatus{}, err
 	}
-	s, err := parseWorktreeStatus(string(out))
-	s.Root = root
-	return s, err
+	return records.snapshot(root), nil
 }
 
-func parseWorktreeStatus(out string) (WorktreeStatus, error) {
-	s := WorktreeStatus{Files: make(map[string]FileStatus)}
+// Keep Git's record order for list callers; snapshots offer keyed lookup instead.
+type statusRecords struct {
+	files   []FileStatus
+	ignored []string
+}
+
+func (s statusRecords) snapshot(root string) WorktreeStatus {
+	snapshot := WorktreeStatus{Root: root, Files: make(map[string]FileStatus, len(s.files)), Ignored: s.ignored}
+	for _, f := range s.files {
+		snapshot.Files[f.Path] = f
+	}
+	return snapshot
+}
+
+func readStatusRecords(ctx context.Context, dir string, options ...string) (statusRecords, error) {
+	args := append([]string{"--no-optional-locks", "status", "--porcelain=v2", "-z", "--untracked-files=all"}, options...)
+	out, err := gitCmd(ctx, dir, args...).Output()
+	if ctx.Err() != nil {
+		return statusRecords{}, ctx.Err()
+	}
+	if err != nil {
+		return statusRecords{}, fmt.Errorf("read status: %w", err)
+	}
+	return parseWorktreeStatus(string(out))
+}
+
+func parseWorktreeStatus(out string) (statusRecords, error) {
+	var s statusRecords
+	if out != "" && !strings.HasSuffix(out, "\x00") {
+		return s, fmt.Errorf("unterminated status record")
+	}
 	records := strings.Split(out, "\x00")
 	for i := 0; i < len(records); i++ {
 		r := records[i]
@@ -76,7 +101,7 @@ func parseWorktreeStatus(out string) (WorktreeStatus, error) {
 				return s, fmt.Errorf("malformed status record")
 			}
 			if r[0] == '!' {
-				s.Ignored = append(s.Ignored, r[2:])
+				s.ignored = append(s.ignored, r[2:])
 				continue
 			}
 			f = FileStatus{Path: r[2:], Untracked: true}
@@ -103,7 +128,7 @@ func parseWorktreeStatus(out string) (WorktreeStatus, error) {
 		default:
 			return s, fmt.Errorf("unknown status record %q", r[0])
 		}
-		s.Files[f.Path] = f
+		s.files = append(s.files, f)
 	}
 	return s, nil
 }

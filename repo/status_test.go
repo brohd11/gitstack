@@ -11,7 +11,7 @@ import (
 
 func TestParseWorktreeStatus(t *testing.T) {
 	unusual := "dir/ space\t雪\nname -> x "
-	s, err := parseWorktreeStatus("# future header\x00" +
+	records, err := parseWorktreeStatus("# future header\x00" +
 		"1 MM N... 100644 100644 100644 abc def mixed.go\x00" +
 		"2 R. N... 100644 100644 100644 abc def R100 " + unusual + "\x00old\nname\x00" +
 		"u UU N... 100644 100644 100644 100644 a b c conflict.go\x00" +
@@ -19,6 +19,7 @@ func TestParseWorktreeStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s := records.snapshot("")
 	if f := s.Files["mixed.go"]; f.Index != 'M' || f.Worktree != 'M' {
 		t.Fatalf("mixed = %+v", f)
 	}
@@ -31,7 +32,10 @@ func TestParseWorktreeStatus(t *testing.T) {
 	if !reflect.DeepEqual(s.Ignored, []string{"ignored/"}) {
 		t.Fatal(s.Ignored)
 	}
-	for _, bad := range []string{"1 short\x00", "2 R. N... 1 1 1 a b R100 new\x00", "?\x00"} {
+	if got := []string{records.files[0].Path, records.files[1].Path, records.files[2].Path, records.files[3].Path}; !reflect.DeepEqual(got, []string{"mixed.go", unusual, "conflict.go", "new/file.go"}) {
+		t.Fatalf("record order = %q", got)
+	}
+	for _, bad := range []string{"1 short\x00", "2 R. N... 1 1 1 a b R100 new\x00", "?\x00", "? unterminated"} {
 		if _, err := parseWorktreeStatus(bad); err == nil {
 			t.Fatalf("accepted malformed %q", bad)
 		}

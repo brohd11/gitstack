@@ -314,15 +314,21 @@ func TestCommitPreviewRows(t *testing.T) {
 		{Status: repo.FileStatus{Path: "new\nfile", Untracked: true}, Stat: &repo.DiffStat{Added: 2}},
 	}
 	changes, stats := commitPreviewRows(files)
-	if changes[0] != (repo.GitChange{Code: "R ", Path: "old name -> new name"}) {
+	if changes[0] != (repo.GitChange{Code: "R ", Path: "new name", OriginalPath: "old name"}) {
 		t.Fatal(changes[0])
 	}
-	if changes[1] != (repo.GitChange{Code: "??", Path: `"new\nfile"`}) {
+	if changes[1] != (repo.GitChange{Code: "??", Path: "new\nfile"}) {
 		t.Fatal(changes[1])
 	}
 	for i, c := range changes {
 		if stats[c.Path] != files[i].Stat {
 			t.Fatalf("lost statistics for %q", c.Path)
+		}
+	}
+	for _, lines := range [][]string{commitPaneLines(changes, true, stats), fileLines(changes)} {
+		body := strings.Join(lines, "\n")
+		if !strings.Contains(body, "old name -> new name") || !strings.Contains(body, `"new\nfile"`) || strings.Contains(body, "new\nfile") {
+			t.Fatalf("lost rename label or filename escaping: %q", lines)
 		}
 	}
 }

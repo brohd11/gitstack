@@ -1,11 +1,81 @@
 package repoui
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/brohd11/bubblestack/components"
+	"github.com/brohd11/bubblestack/core"
+	"github.com/brohd11/gitstack/repo"
 	"github.com/charmbracelet/x/ansi"
 )
+
+func TestDiffPickerRawPathsAndLabels(t *testing.T) {
+	r := tagTestRepo(t, nil)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", r.Dir, "-c", "core.hooksPath=" + os.DevNull,
+			"-c", "user.name=Test", "-c", "user.email=test@example.com"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(name, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(r.Dir, name), []byte(text), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tracked, renamed, untracked := "tracked\t雪\nfile", "renamed\nfile", "untracked\tfile"
+	if runtime.GOOS == "windows" {
+		tracked, renamed, untracked = "tracked 雪 file", "renamed file", "untracked file"
+	}
+	write(tracked, "before\n")
+	write("old name", strings.Repeat("retained\n", 20))
+	run("add", ".")
+	run("commit", "--no-gpg-sign", "-qm", "baseline")
+	write(tracked, "after\nextra\n")
+	run("mv", "old name", renamed)
+	write(renamed, strings.Repeat("retained\n", 20)+"rename edit\n")
+	write(untracked, "untracked content\n")
+	expected := map[string]string{
+		" M  " + changeLabel(repo.GitChange{Path: tracked}):                           counts(2, 1),
+		"RM  " + changeLabel(repo.GitChange{Path: renamed, OriginalPath: "old name"}): counts(1, 0),
+		"??  " + changeLabel(repo.GitChange{Path: untracked}):                         "new file — not tracked yet",
+	}
+	items := diffItems(r)
+	if len(items) != len(expected)+1 {
+		t.Fatalf("items = %+v", items)
+	}
+	sh := core.NewShared(nil)
+	router := core.NewRouter(sh, []core.TabEntry{{Title: "test", New: func(*core.Shared) core.Screen {
+		return components.NewPicker(nil, components.PickerOpts{})
+	}}})
+	for _, row := range items[1:] {
+		item := row.(components.Item)
+		want, ok := expected[item.Name]
+		if !ok || item.Desc != want || strings.ContainsAny(item.Name, "\t\r\n\x1b") {
+			t.Fatalf("picker row = %+v, want description %q", item, want)
+		}
+		m, _ := router.Update(item.Pick(sh))
+		router = m.(core.Router)
+		screen, ok := router.Top().(*DiffScreen)
+		if !ok || screen.empty != "" || len(screen.lines) == 0 {
+			t.Fatalf("picker opened an empty or failed diff: %+v", screen)
+		}
+		if screen.title != item.Name[4:] {
+			t.Fatalf("title = %q, want %q", screen.title, item.Name[4:])
+		}
+		delete(expected, item.Name)
+	}
+	if len(expected) != 0 {
+		t.Fatalf("missing rows: %+v", expected)
+	}
+}
 
 // The layout modes. NewDiffScreen shells out to git, so these build the screen directly
 // from the parsed fixture in diffrender_test.go — the mode logic is about width and state,
