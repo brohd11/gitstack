@@ -11,11 +11,12 @@ import (
 	"testing"
 )
 
-// Keep the filesystem cases portable; parser tests also cover these bytes on Windows.
+// Keep the filesystem cases portable: Windows rejects '>', control bytes, quotes and
+// edge spaces in filenames, so the parser tests cover those bytes there instead.
 func unusualNames() []string {
-	names := []string{"has space.txt", "雪.txt", "literal -> arrow.txt"}
+	names := []string{"has space.txt", "雪.txt"}
 	if runtime.GOOS != "windows" {
-		names = append(names, " leading and trailing ", "tab\tname", "line\nname", `quote"name`)
+		names = append(names, "literal -> arrow.txt", " leading and trailing ", "tab\tname", "line\nname", `quote"name`)
 	}
 	return names
 }
@@ -163,7 +164,7 @@ func TestGitChangesSubmoduleConfiguration(t *testing.T) {
 
 func TestGitChangesRenameAndOrder(t *testing.T) {
 	dir := gutterRepo(t)
-	origin, destination := "a old -> name", "b new name"
+	origin, destination := "a old name", "b new name"
 	if runtime.GOOS != "windows" {
 		origin, destination = "a old\t雪\nname", "b new\t雪\nname "
 	}

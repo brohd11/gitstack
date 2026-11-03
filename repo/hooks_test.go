@@ -196,7 +196,8 @@ func TestHookTagContextAndAppIsolation(t *testing.T) {
 	if len(records) != 3 {
 		t.Fatalf("records = %+v", records)
 	}
-	root := GitOutput(work, "rev-parse", "--show-toplevel")
+	// Git prints forward slashes on Windows; hooks see the filepath.Clean'd root.
+	root := filepath.Clean(GitOutput(work, "rev-parse", "--show-toplevel"))
 	for i, r := range records {
 		event := "pre_tag"
 		if i == 2 {

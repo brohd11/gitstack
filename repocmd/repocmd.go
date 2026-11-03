@@ -5,12 +5,16 @@ package repocmd
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/brohd11/gitstack/repo"
 
@@ -62,15 +66,14 @@ excluded unless --include-root), and run a shell command inside each one.
 With --nested=false, stop descending once a repo is found beneath the scanned directory.
 Use --nested to also gather repos inside those repos, within the same depth limit.
 
-The command is joined and run via "sh -c", so pipes, &&, and redirects work — quote
-them as a single argument so your own shell doesn't consume them first:
+%[2]s
 
   %[1]s repos -- git status -s
   %[1]s repos --dirty -- git fetch
-  %[1]s repos -- "git log --oneline | head -1"
+  %[1]s repos -- "%[3]s"
 
 By default output is captured and a header is printed only for repos that produced
-output; use --raw to live-stream output instead.`, app),
+output; use --raw to live-stream output instead.`, append([]any{app}, shellHelp(runtime.GOOS)...)...),
 		Args:          cobra.ArbitraryArgs,
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -165,11 +168,12 @@ func run(cmd *cobra.Command, args []string, cfg runConfig) error {
 
 	cmdStr := strings.Join(args, " ")
 	prefix := filepath.Base(base)
+	argv := shellArgv(runtime.GOOS, exec.LookPath, cmdStr)
 
 	for _, rel := range repos {
 		full := filepath.Join(base, rel)
 		display := filepath.Join(prefix, rel)
-		c := exec.CommandContext(cmd.Context(), "sh", "-c", cmdStr)
+		c := exec.CommandContext(cmd.Context(), argv[0], argv[1:]...)
 		c.Dir = full
 
 		if cfg.raw {
@@ -203,6 +207,37 @@ func run(cmd *cobra.Command, args []string, cfg runConfig) error {
 		}
 	}
 	return nil
+}
+
+// shellArgv is how a joined command runs: "sh -c" on Unix. Windows has no sh unless Git
+// Bash is on PATH, so it uses PowerShell: pwsh when installed, else the built-in
+// powershell.exe. -EncodedCommand (base64 UTF-16LE) sidesteps PowerShell re-parsing the
+// quotes Go's argv escaping produces.
+func shellArgv(goos string, lookPath func(string) (string, error), cmdStr string) []string {
+	if goos != "windows" {
+		return []string{"sh", "-c", cmdStr}
+	}
+	shell := "powershell"
+	if _, err := lookPath("pwsh"); err == nil {
+		shell = "pwsh"
+	}
+	units := utf16.Encode([]rune(cmdStr))
+	buf := make([]byte, 2*len(units))
+	for i, u := range units {
+		binary.LittleEndian.PutUint16(buf[2*i:], u)
+	}
+	return []string{shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", base64.StdEncoding.EncodeToString(buf)}
+}
+
+// shellHelp is the help text's shell paragraph and pipe example for goos.
+func shellHelp(goos string) []any {
+	if goos == "windows" {
+		return []any{`The command is joined and run via PowerShell (pwsh, else powershell.exe), so
+pipes and redirects work (&& needs pwsh) — quote them as a single argument so your
+own shell doesn't consume them first:`, "git log --oneline | Select-Object -First 1"}
+	}
+	return []any{`The command is joined and run via "sh -c", so pipes, &&, and redirects work — quote
+them as a single argument so your own shell doesn't consume them first:`, "git log --oneline | head -1"}
 }
 
 func header(w io.Writer, text string) {

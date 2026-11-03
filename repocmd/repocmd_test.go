@@ -2,6 +2,8 @@ package repocmd
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 // nestedRepoTree builds base/<name>/.git for each name (real git init), so FindGitRepos
@@ -60,20 +63,24 @@ func TestNestedDiscovery(t *testing.T) {
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
-			// A shell command must run in exactly the same repos as listing mode.
-			output := runCmd(t, opts, append(args, "--", "pwd")...)
-			var dirs []string
-			for _, line := range strings.Split(output, "\n") {
-				if strings.HasPrefix(line, base) {
-					dirs = append(dirs, line)
+			// A shell command must run in exactly the same repos as listing mode. Each run
+			// drops a marker in its working directory rather than printing pwd, whose
+			// format differs by shell. echo and > mean the same in sh and PowerShell.
+			const marker = ".repocmd-ran"
+			runCmd(t, opts, append(args, "--", "echo x > "+marker)...)
+			var ran []string
+			for _, rel := range []string{".", "alpha", filepath.Join("alpha", "child"), filepath.Join("group", "beta")} {
+				path := filepath.Join(base, rel, marker)
+				if _, err := os.Stat(path); err == nil {
+					ran = append(ran, rel)
+					// Leftover markers would dirty the repos for the --dirty checks below.
+					if err := os.Remove(path); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
-			var wantDirs []string
-			for _, rel := range tc.want {
-				wantDirs = append(wantDirs, filepath.Join(base, rel))
-			}
-			if !reflect.DeepEqual(dirs, wantDirs) {
-				t.Fatalf("command ran in %v, want %v", dirs, wantDirs)
+			if !reflect.DeepEqual(ran, tc.want) {
+				t.Fatalf("command ran in %v, want %v", ran, tc.want)
 			}
 		})
 	}
@@ -163,6 +170,43 @@ func TestRunsCommandInEachRepo(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+// Unix runs sh -c; Windows runs PowerShell (pwsh preferred) with the command encoded so
+// quotes, pipes and non-ASCII survive intact.
+func TestShellArgv(t *testing.T) {
+	const cmdStr = `git log --format="%s 'x'" | Select-Object -First 1 # 雪`
+	if got := shellArgv("linux", nil, cmdStr); !reflect.DeepEqual(got, []string{"sh", "-c", cmdStr}) {
+		t.Fatalf("unix argv = %q", got)
+	}
+	found := func(string) (string, error) { return `C:\pwsh.exe`, nil }
+	missing := func(string) (string, error) { return "", exec.ErrNotFound }
+	for _, tc := range []struct {
+		lookPath func(string) (string, error)
+		shell    string
+	}{{found, "pwsh"}, {missing, "powershell"}} {
+		got := shellArgv("windows", tc.lookPath, cmdStr)
+		if len(got) != 5 || got[0] != tc.shell || got[3] != "-EncodedCommand" {
+			t.Fatalf("windows argv = %q, want %s ... -EncodedCommand <b64>", got, tc.shell)
+		}
+		raw, err := base64.StdEncoding.DecodeString(got[4])
+		if err != nil || len(raw)%2 != 0 {
+			t.Fatalf("encoded command %q: %v", got[4], err)
+		}
+		units := make([]uint16, len(raw)/2)
+		for i := range units {
+			units[i] = binary.LittleEndian.Uint16(raw[2*i:])
+		}
+		if decoded := string(utf16.Decode(units)); decoded != cmdStr {
+			t.Fatalf("decoded %q, want %q", decoded, cmdStr)
+		}
+	}
+	if s := fmt.Sprint(shellHelp("windows")...); !strings.Contains(s, "PowerShell") || strings.Contains(s, "head -1") {
+		t.Errorf("windows help = %q", s)
+	}
+	if s := fmt.Sprint(shellHelp("linux")...); !strings.Contains(s, `"sh -c"`) {
+		t.Errorf("unix help = %q", s)
 	}
 }
 
